@@ -1,4 +1,4 @@
-﻿namespace Nedev.DocxToPdf.PdfEngine;
+namespace Nedev.DocxToPdf.PdfEngine;
 
 /// <summary>
 /// 分栏文本排版
@@ -9,6 +9,8 @@ public class ColumnText
     private readonly List<IElement> _elements = [];
     private float _llx, _lly, _urx, _ury;
     private float _yLine;
+    private int _currentPageNumber = 1;
+    private AnnotationCollection? _annotations;
 
     public float YLine
     {
@@ -22,6 +24,16 @@ public class ColumnText
     public ColumnText(PdfContentByte canvas)
     {
         _canvas = canvas;
+    }
+
+    public void SetAnnotationCollection(AnnotationCollection annotations)
+    {
+        _annotations = annotations;
+    }
+
+    public void SetCurrentPage(int pageNumber)
+    {
+        _currentPageNumber = pageNumber;
     }
 
     public void SetSimpleColumn(float llx, float lly, float urx, float ury)
@@ -167,6 +179,12 @@ public class ColumnText
                 _canvas.MoveTo(x, textBaselineY + chunk.UnderlineYPosition);
                 _canvas.LineTo(x + chunk.GetWidth(), textBaselineY + chunk.UnderlineYPosition);
                 _canvas.Stroke();
+            }
+
+            if (_annotations != null && !string.IsNullOrEmpty(chunk.Anchor))
+            {
+                var chunkHeight = chunk.Font.Size * 1.2f;
+                _annotations.AddLink(_currentPageNumber, x, y - chunkHeight, chunk.GetWidth(), chunkHeight, chunk.Anchor);
             }
 
             _canvas.RestoreState();

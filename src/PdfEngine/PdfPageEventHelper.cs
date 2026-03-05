@@ -1,4 +1,4 @@
-﻿namespace Nedev.DocxToPdf.PdfEngine;
+namespace Nedev.DocxToPdf.PdfEngine;
 
 /// <summary>
 /// PDF页面事件辅助类
@@ -42,6 +42,7 @@ public class BookmarkTracker : PdfPageEventHelper
     public override void OnOpenDocument(PdfWriter writer, PdfDocument document)
     {
         _rootOutline = new PdfOutline(null, new PdfDestination(PdfDestination.XYZ), "Bookmarks", true);
+        writer.SetRootOutline(_rootOutline);
     }
 
     public void AddHeadingBookmark(string title, int level)

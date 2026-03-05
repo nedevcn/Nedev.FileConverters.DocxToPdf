@@ -1,4 +1,4 @@
-﻿using Nedev.DocxToPdf.PdfEngine;
+using Nedev.DocxToPdf.PdfEngine;
 
 namespace Nedev.DocxToPdf.Models;
 
@@ -118,9 +118,75 @@ public class ConvertOptions
     public string FootnoteNumberFormat { get; set; } = "arabic";
 
     /// <summary>
+    /// PDF加密/密码保护设置
+    /// </summary>
+    public PdfEncryptionOptions? Encryption { get; set; }
+
+    /// <summary>
+    /// PDF元数据 - 标题
+    /// </summary>
+    public string? PdfTitle { get; set; }
+
+    /// <summary>
+    /// PDF元数据 - 作者
+    /// </summary>
+    public string? PdfAuthor { get; set; }
+
+    /// <summary>
+    /// PDF元数据 - 主题
+    /// </summary>
+    public string? PdfSubject { get; set; }
+
+    /// <summary>
+    /// PDF元数据 - 关键词（逗号分隔）
+    /// </summary>
+    public string? PdfKeywords { get; set; }
+
+    /// <summary>
+    /// PDF元数据 - 创建者（默认"Nedev.DocxToPdf"）
+    /// </summary>
+    public string PdfCreator { get; set; } = "Nedev.DocxToPdf";
+
+    /// <summary>
     /// 默认选项
     /// </summary>
     public static ConvertOptions Default => new();
+}
+
+/// <summary>
+/// PDF加密选项
+/// </summary>
+public class PdfEncryptionOptions
+{
+    /// <summary>
+    /// 用户密码（打开PDF需要）
+    /// </summary>
+    public string? UserPassword { get; set; }
+
+    /// <summary>
+    /// 所有者密码（用于完全权限）
+    /// </summary>
+    public string? OwnerPassword { get; set; }
+
+    /// <summary>
+    /// 是否允许打印，默认 true
+    /// </summary>
+    public bool AllowPrint { get; set; } = true;
+
+    /// <summary>
+    /// 是否允许修改内容，默认 true
+    /// </summary>
+    public bool AllowModifyContent { get; set; } = true;
+
+    /// <summary>
+    /// 是否允许复制内容，默认 true
+    /// </summary>
+    public bool AllowCopyContent { get; set; } = true;
+
+    /// <summary>
+    /// 是否允许填写表单，默认 true
+    /// </summary>
+    public bool AllowFillForms { get; set; } = true;
 }
 
 /// <summary>

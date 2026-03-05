@@ -1,4 +1,4 @@
-﻿using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.DocxToPdf.Helpers;
 using Nedev.DocxToPdf.PdfEngine;

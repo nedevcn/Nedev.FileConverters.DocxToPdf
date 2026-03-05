@@ -1,6 +1,7 @@
-﻿using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using DocumentFormat.OpenXml;
+using System.IO;
 using Nedev.DocxToPdf.Converters;
 using Nedev.DocxToPdf.Helpers;
 using Nedev.DocxToPdf.Models;
@@ -167,6 +168,40 @@ public class DocxToPdfConverter
         // 设置中文字体（使用系统已安装的字体）
         writer.SetChineseFont("SimSun");
 
+        // 注解集合（用于超链接等）
+        var annotations = new AnnotationCollection();
+        writer.SetAnnotationCollection(annotations);
+
+        // PDF加密支持
+        if (_options.Encryption != null && !string.IsNullOrEmpty(_options.Encryption.UserPassword))
+        {
+            int permissions = 0;
+            if (_options.Encryption.AllowPrint) permissions |= PdfEncryption.PRINT;
+            if (_options.Encryption.AllowModifyContent) permissions |= PdfEncryption.MODIFY;
+            if (_options.Encryption.AllowCopyContent) permissions |= PdfEncryption.COPY;
+            if (_options.Encryption.AllowFillForms) permissions |= PdfEncryption.FILL_FORM;
+            
+            var encryption = new PdfEncryption(
+                _options.Encryption.UserPassword,
+                _options.Encryption.OwnerPassword,
+                permissions
+            );
+            writer.SetEncryption(encryption);
+        }
+
+        // PDF元数据支持
+        writer.SetMetadata(
+            _options.PdfTitle,
+            _options.PdfAuthor,
+            _options.PdfSubject,
+            _options.PdfKeywords,
+            _options.PdfCreator
+        );
+
+        // 多栏排版管理器（需要尽早初始化以便设置页码）
+        var ct = new ColumnText(writer.DirectContent);
+        ct.SetAnnotationCollection(annotations);
+
         // 书签支持
         var bookmarkTracker = new BookmarkTracker(writer);
         if (hasHeaderFooter)
@@ -176,6 +211,18 @@ public class DocxToPdfConverter
         
         pdfDocument.Open();
         pdfDocument.NewPage(); // MUST start a page so PdfWriter tracks it correctly
+        ct.SetCurrentPage(pdfDocument.PageNumber);
+
+        // 目录提取（如果在配置中启用）
+        var tocEntries = new List<TableOfContentsGenerator.TOCEntry>();
+        if (_options.GenerateTableOfContents)
+        {
+            tocEntries = TableOfContentsGenerator.ExtractTOC(body);
+            if (tocEntries.Count > 0)
+            {
+                GenerateTOCPage(pdfDocument, tocEntries);
+            }
+        }
 
         var paragraphConverter = new ParagraphConverter(fontHelper, styles, colorScheme, hyperlinkTargets, footnoteNumberById, endnoteNumberById)
         {
@@ -204,9 +251,7 @@ public class DocxToPdfConverter
         }
         var elements = body.ChildElements.ToList();
         var i = 0;
-
-        // 多栏排版管理器
-        var ct = new ColumnText(writer.DirectContent);
+        
         int currentColumn = 0;
         int currentSectionIndex = 0;
         bool sectionBreakEncountered = false;
@@ -305,6 +350,7 @@ public class DocxToPdfConverter
                     }
 
                     pdfDocument.NewPage();
+                    ct.SetCurrentPage(pdfDocument.PageNumber);
                     currentColumn = 0;
                     SetColumnBounds();
                     ct.YLine = _options.PageSize.Height - _options.MarginTop;
@@ -361,6 +407,7 @@ public class DocxToPdfConverter
                         if (currentY - imgHeight < _options.MarginBottom)
                         {
                             pdfDocument.NewPage();
+                            ct.SetCurrentPage(pdfDocument.PageNumber);
                             currentColumn = 0;
                             SetColumnBounds();
                             ct.YLine = _options.PageSize.Height - _options.MarginTop;
@@ -484,6 +531,7 @@ public class DocxToPdfConverter
                     if (currentColumn >= _currentColumnInfo.Count)
                     {
                         pdfDocument.NewPage();
+                        ct.SetCurrentPage(pdfDocument.PageNumber);
                         currentColumn = 0;
                         ct.YLine = _options.PageSize.Height - _options.MarginTop;
                     }
@@ -508,6 +556,12 @@ public class DocxToPdfConverter
             CommentExporter.AddCommentsSummaryPage(docxDocument, pdfDocument);
         }
 
+        // 添加修订汇总页
+        if (_options.AddRevisionsSummaryPage)
+        {
+            RevisionHandler.AddRevisionsSummaryPage(body, pdfDocument);
+        }
+
         pdfDocument.Close();
         writer.Close();
 
@@ -525,6 +579,92 @@ public class DocxToPdfConverter
             watermarkedStream.Position = 0;
             watermarkedStream.CopyTo(pdfStream);
             pdfStream.Position = 0;
+        }
+
+        // 更新目录页码
+        if (_options.GenerateTableOfContents && tocEntries.Count > 0)
+        {
+            pdfStream.Position = 0;
+            using var reader = new PdfReader(pdfStream);
+            using var outputStream = new MemoryStream();
+            using var stamper = new PdfStamper(reader, outputStream);
+            var totalPages = reader.NumberOfPages;
+
+            if (totalPages > 1)
+            {
+                var pageSize = reader.GetPageSize(1);
+                var contentFont = FontFactory.GetFont("STSong-Light", 10);
+
+                var tocPageTextMap = new Dictionary<int, string>();
+                for (var tocIndex = 0; tocIndex < tocEntries.Count; tocIndex++)
+                {
+                    var targetPage = tocIndex + 2;
+                    if (targetPage > totalPages) targetPage = totalPages;
+                    tocPageTextMap[tocIndex] = targetPage.ToString();
+                }
+
+                var cb = stamper.GetOverContent(1);
+                if (cb != null)
+                {
+                    cb.BeginText();
+                    cb.SetFontAndSize(contentFont.Family, 10);
+
+                    foreach (var kvp in tocPageTextMap)
+                    {
+                        var y = pageSize.Height - 112f - (kvp.Key * 18f);
+                        if (y < 50f) break;
+                        var x = pageSize.Width - 80f;
+                        cb.ShowTextAligned(Element.ALIGN_LEFT, kvp.Value, x, y, 0);
+                    }
+
+                    cb.EndText();
+                }
+            }
+
+            stamper.Close();
+            outputStream.Position = 0;
+            pdfStream.SetLength(0);
+            outputStream.CopyTo(pdfStream);
+            pdfStream.Position = 0;
+        }
+    }
+
+    /// <summary>
+    /// 生成目录页
+    /// </summary>
+    private void GenerateTOCPage(PdfDocument pdfDocument, List<TableOfContentsGenerator.TOCEntry> entries)
+    {
+        pdfDocument.NewPage();
+
+        var titleFont = FontFactory.GetFont("STSong-Light", 24, iTextFont.BOLD);
+        var title = new iTextParagraph("目录", titleFont)
+        {
+            Alignment = Element.ALIGN_CENTER,
+            SpacingAfter = 30f
+        };
+        pdfDocument.Add(title);
+
+        var contentFont = FontFactory.GetFont("STSong-Light", 12);
+        var pageNumFont = FontFactory.GetFont("STSong-Light", 10);
+
+        foreach (var entry in entries)
+        {
+            var indent = (entry.Level - 1) * 20f;
+            var para = new iTextParagraph
+            {
+                IndentationLeft = indent,
+                SpacingAfter = 4f
+            };
+
+            var titleChunk = new iTextChunk(entry.Title, contentFont);
+            para.Add(titleChunk);
+
+            para.Add(new iTextChunk(" ", contentFont));
+
+            var pageNumChunk = new iTextChunk("1", pageNumFont);
+            para.Add(pageNumChunk);
+
+            pdfDocument.Add(para);
         }
     }
 
@@ -661,9 +801,12 @@ public class DocxToPdfConverter
             case "DOCVARIABLE":
             case "LISTNUM":
             case "SYMBOL":
-            case "EQ":
                 // 这些字段暂时不支持
                 return null;
+                
+            case "EQ":
+                // EQ (Equation) 字段支持
+                return ParseEqField(instruction);
                 
             default:
                 // 未知字段，尝试返回字段名本身
@@ -678,6 +821,98 @@ public class DocxToPdfConverter
     {
         var formatMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"\\@\s*""([^""]+)""");
         return formatMatch.Success ? formatMatch.Groups[1].Value : defaultFormat;
+    }
+    
+    /// <summary>
+    /// 解析 EQ (Equation) 字段
+    /// EQ 字段是 Word 中创建简单数学公式的一种方式（不同于 OMML）
+    /// </summary>
+    private static string ParseEqField(string instruction)
+    {
+        if (string.IsNullOrEmpty(instruction)) return "";
+        
+        var eqMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"EQ\s*(.*)");
+        if (!eqMatch.Success) return "";
+        
+        var eqContent = eqMatch.Groups[1].Value;
+        
+        var switches = System.Text.RegularExpressions.Regex.Matches(eqContent, @"\\(\w)\s*(\([^)]*\)|[^\s])");
+        var result = new System.Text.StringBuilder();
+        
+        foreach (System.Text.RegularExpressions.Match sw in switches)
+        {
+            var switchCode = sw.Groups[1].Value;
+            var switchArg = sw.Groups[2].Value.Trim('(', ')');
+            
+            switch (switchCode.ToLower())
+            {
+                case "f":
+                case "fr":
+                    // 分数 \f(numerator,denominator)
+                    var fracParts = switchArg.Split(',');
+                    if (fracParts.Length >= 2)
+                        result.Append($"({fracParts[0]})/({fracParts[1]})");
+                    else
+                        result.Append($"({switchArg})");
+                    break;
+                case "su":
+                    // 上标 \s(up)
+                    var upMatch = System.Text.RegularExpressions.Regex.Match(switchArg, @"\(([^,]+),([^)]+)\)");
+                    if (upMatch.Success)
+                        result.Append($"{upMatch.Groups[1].Value}^{upMatch.Groups[2].Value}");
+                    else
+                        result.Append($"^{switchArg}");
+                    break;
+                case "di":
+                    // 下标 \d(down)
+                    var downMatch = System.Text.RegularExpressions.Regex.Match(switchArg, @"\(([^,]+),([^)]+)\)");
+                    if (downMatch.Success)
+                        result.Append($"{downMatch.Groups[1].Value}_{downMatch.Groups[2].Value}");
+                    else
+                        result.Append($"_{switchArg}");
+                    break;
+                case "ra":
+                    // 根号 \r(order,radicand)
+                    var radMatch = System.Text.RegularExpressions.Regex.Match(switchArg, @"\(([^,]+),?([^)]*)\)");
+                    if (radMatch.Success)
+                    {
+                        var order = radMatch.Groups[1].Value;
+                        var radicand = radMatch.Groups[2].Value;
+                        if (!string.IsNullOrEmpty(order) && !string.IsNullOrEmpty(radicand))
+                            result.Append($"{order}√({radicand})");
+                        else if (!string.IsNullOrEmpty(radicand))
+                            result.Append($"√({radicand})");
+                    }
+                    break;
+                case "in":
+                    // 积分 \i(start,end,integrand)
+                    var intMatch = System.Text.RegularExpressions.Regex.Match(switchArg, @"\(([^,]+),([^,]+),([^)]+)\)");
+                    if (intMatch.Success)
+                        result.Append($"∫_{intMatch.Groups[1].Value}}}​^{intMatch.Groups[2].Value}({intMatch.Groups[3].Value})");
+                    else
+                        result.Append($"∫({switchArg})");
+                    break;
+                case "sum":
+                    // 求和
+                    result.Append($"∑({switchArg})");
+                    break;
+                case "ov":
+                    // 上划线 \o(over)
+                    result.Append($"({switchArg})¯");
+                    break;
+                case "ac":
+                    // 省略号 \ac
+                    result.Append("...");
+                    break;
+                default:
+                    // 处理未知开关，直接输出
+                    if (!string.IsNullOrEmpty(switchArg))
+                        result.Append(switchArg);
+                    break;
+            }
+        }
+        
+        return result.Length > 0 ? result.ToString() : "";
     }
     
     /// <summary>

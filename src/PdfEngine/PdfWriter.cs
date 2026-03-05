@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Text;
 using SkiaSharp;
 
@@ -216,6 +216,37 @@ public class PdfWriter : IDisposable
 
     private readonly Dictionary<int, string> _pageDirectContents = [];
     private int _currentPageDirectContentIdx = 1;
+    private AnnotationCollection? _annotations;
+    private PdfEncryption? _encryption;
+    private string? _pdfTitle;
+    private string? _pdfAuthor;
+    private string? _pdfSubject;
+    private string? _pdfKeywords;
+    private string _pdfCreator = "Nedev.DocxToPdf";
+
+    public void SetEncryption(PdfEncryption encryption)
+    {
+        _encryption = encryption;
+    }
+
+    public void SetMetadata(string? title, string? author, string? subject, string? keywords, string? creator)
+    {
+        _pdfTitle = title;
+        _pdfAuthor = author;
+        _pdfSubject = subject;
+        _pdfKeywords = keywords;
+        _pdfCreator = creator ?? "Nedev.DocxToPdf";
+    }
+
+    public void SetAnnotationCollection(AnnotationCollection annotations)
+    {
+        _annotations = annotations;
+    }
+
+    public void SetRootOutline(PdfOutline outline)
+    {
+        RootOutline = outline;
+    }
 
     public PdfWriter(Stream outputStream, PdfDocument document)
     {
@@ -395,7 +426,29 @@ public class PdfWriter : IDisposable
             resources += " " + imageResources;
         }
 
-        var pageDict = $"<< /Type /Page /Parent {pagesRef} 0 R /MediaBox [0 0 {page.PageSize.Width:F2} {page.PageSize.Height:F2}] /Contents {contentObj.Number} 0 R /Resources << {resources} >> >>";
+        // 构建页面字典（可能包含注解）
+        var pageDict = $"<< /Type /Page /Parent {pagesRef} 0 R /MediaBox [0 0 {page.PageSize.Width:F2} {page.PageSize.Height:F2}] /Contents {contentObj.Number} 0 R /Resources << {resources} >> ";
+        
+        // 添加注解
+        if (_annotations != null && _annotations.GetAnnotationsForPage(page.PageNumber).Count > 0)
+        {
+            var annotObj = AddObject();
+            var pageAnnots = _annotations.GetAnnotationsForPage(page.PageNumber);
+            var annotRefs = new List<string>();
+            
+            foreach (var annot in pageAnnots)
+            {
+                var annotStr = annot.ToPdfDict(annotObj.Number);
+                var annotBytes = Encoding.Latin1.GetBytes(annotStr);
+                _xref[annotObj.Number] = _outputStream.Position;
+                _outputStream.Write(annotBytes, 0, annotBytes.Length);
+                annotRefs.Add($"{annotObj.Number} 0 R");
+            }
+            
+            pageDict += $"/Annots [{string.Join(" ", annotRefs)}] ";
+        }
+        
+        pageDict += ">>";
         WriteObjectText(pageObj, pageDict);
 
         return pageObj;
@@ -1090,8 +1143,64 @@ public class PdfWriter : IDisposable
 
     private void WriteCatalog(PdfIndirectObject catalogObj, int pagesRef)
     {
-        var content = $"<< /Type /Catalog /Pages {pagesRef} 0 R >>";
+        var content = $"<< /Type /Catalog /Pages {pagesRef} 0 R ";
+        
+        if (RootOutline != null)
+        {
+            var outlineObj = AddObject();
+            var outlineContent = WriteOutlineRecursive(RootOutline, pagesRef, 1);
+            WriteObjectText(outlineObj, outlineContent);
+            content += $"/Outlines {outlineObj.Number} 0 R ";
+        }
+        
+        content += ">>";
         WriteObjectText(catalogObj, content);
+    }
+    
+    private string WriteOutlineRecursive(PdfOutline outline, int pagesRef, int indent)
+    {
+        var sb = new StringBuilder();
+        var titleEscaped = EscapePdfString(outline.Title);
+        
+        sb.Append($"<< /Title ({titleEscaped}) ");
+        
+        if (outline.Destination != null)
+        {
+            sb.Append($"/Dest [{pagesRef} 0 R /Fit] ");
+        }
+        
+        if (outline.Children.Count > 0)
+        {
+            var kids = new List<string>();
+            foreach (var child in outline.Children)
+            {
+                var childObj = AddObject();
+                var childContent = WriteOutlineRecursive(child, pagesRef, indent + 1);
+                WriteObjectText(childObj, childContent);
+                kids.Add($"{childObj.Number} 0 R");
+            }
+            sb.Append($"/First {kids[0]} 0 R /Last {kids[^1]} 0 R /Count {outline.Children.Count} ");
+        }
+        
+        if (outline.Parent != null)
+        {
+            var parentObjNum = FindOutlineObjectNumber(outline.Parent);
+            if (parentObjNum > 0)
+                sb.Append($"/Parent {parentObjNum} 0 R ");
+        }
+        
+        sb.Append(">>");
+        return sb.ToString();
+    }
+    
+    private int FindOutlineObjectNumber(PdfOutline outline)
+    {
+        return _objects.FirstOrDefault(o => o.Number > 1000)?.Number ?? 0;
+    }
+    
+    private static string EscapePdfString(string s)
+    {
+        return s.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
     }
 
     private void WriteXref()
@@ -1533,7 +1642,38 @@ public class PdfWriter : IDisposable
     {
         var maxObjNum = _objects.Count > 0 ? _objects.Max(o => o.Number) : 0;
         var size = maxObjNum + 1;
-        var trailer = $"trailer\n<< /Size {size} /Root {rootObjNumber} 0 R >>\nstartxref\n{_xrefOffset}\n%%EOF\n";
+        
+        var trailer = $"trailer\n<< /Size {size} /Root {rootObjNumber} 0 R ";
+        
+        // 添加PDF元数据
+        if (!string.IsNullOrEmpty(_pdfTitle) || !string.IsNullOrEmpty(_pdfAuthor) || 
+            !string.IsNullOrEmpty(_pdfSubject) || !string.IsNullOrEmpty(_pdfKeywords))
+        {
+            var infoDict = new StringBuilder();
+            infoDict.Append("/Info << ");
+            
+            if (!string.IsNullOrEmpty(_pdfTitle))
+                infoDict.Append($"/Title ({EscapePdfString(_pdfTitle)}) ");
+            if (!string.IsNullOrEmpty(_pdfAuthor))
+                infoDict.Append($"/Author ({EscapePdfString(_pdfAuthor)}) ");
+            if (!string.IsNullOrEmpty(_pdfSubject))
+                infoDict.Append($"/Subject ({EscapePdfString(_pdfSubject)}) ");
+            if (!string.IsNullOrEmpty(_pdfKeywords))
+                infoDict.Append($"/Keywords ({EscapePdfString(_pdfKeywords)}) ");
+            if (!string.IsNullOrEmpty(_pdfCreator))
+                infoDict.Append($"/Creator ({EscapePdfString(_pdfCreator)}) ");
+            
+            infoDict.Append($"/CreationDate (D:{DateTime.Now:yyyyMMddHHmmss}) ");
+            infoDict.Append(">>");
+            
+            var infoObj = AddObject();
+            WriteObjectText(infoObj, infoDict.ToString());
+            trailer += $"/Info {infoObj.Number} 0 R ";
+        }
+        
+        trailer += ">>\nstartxref\n{_xrefOffset}\n%%EOF\n";
+        trailer = trailer.Replace("{_xrefOffset}", _xrefOffset.ToString());
+        
         WriteBytes(Encoding.Latin1.GetBytes(trailer));
     }
 
