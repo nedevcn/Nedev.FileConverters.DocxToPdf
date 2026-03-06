@@ -129,6 +129,11 @@ public class ColumnText
 
         y -= para.SpacingBefore;
 
+        if (!simulate && para.RenderedCallback != null)
+        {
+            para.RenderedCallback(para, _currentPageNumber);
+        }
+
         var currentX = x + para.IndentationLeft + para.FirstLineIndent;
 
         foreach (var chunk in para.Chunks)

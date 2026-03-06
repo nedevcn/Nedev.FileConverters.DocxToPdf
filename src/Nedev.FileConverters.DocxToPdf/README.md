@@ -9,7 +9,7 @@ A high-performance .NET 10 library and CLI tool for converting DOCX files to PDF
     - Multi-level lists and numbering.
     - Tables with cell merging, borders, and custom background colors.
     - Images (Inline and Floating) with support for text wrapping (Square, Tight, Through, Top/Bottom).
-    - Hyperlinks and Bookmarks.
+    - Hyperlinks and Bookmarks (including field‑based hyperlinks with preserved display text).
 - **Advanced Layout**:
     - Multi-column page layouts.
     - Section-specific page settings (size, margins, orientation).

@@ -218,7 +218,7 @@ public class DocxToPdfConverter : IFileConverter
         ct.SetAnnotationCollection(annotations);
 
         // 书签支持
-        var bookmarkTracker = new BookmarkTracker(writer);
+        var bookmarkTracker = new global::Nedev.FileConverters.DocxToPdf.PdfEngine.BookmarkTracker(writer);
         if (hasHeaderFooter)
             writer.PageEvent = new CombinedPageEvent(sectionTracker, bookmarkTracker);
         else
@@ -230,11 +230,16 @@ public class DocxToPdfConverter : IFileConverter
 
         // 目录提取（如果在配置中启用）
         var tocEntries = new List<TableOfContentsGenerator.TOCEntry>();
+        var tocPageNumbersByKey = new Dictionary<string, Queue<int>>(StringComparer.Ordinal);
+        HashSet<string>? expectedTocKeys = null;
         if (_options.GenerateTableOfContents)
         {
             tocEntries = TableOfContentsGenerator.ExtractTOC(body);
             if (tocEntries.Count > 0)
             {
+                expectedTocKeys = tocEntries
+                    .Select(TableOfContentsGenerator.BuildEntryKey)
+                    .ToHashSet(StringComparer.Ordinal);
                 GenerateTOCPage(pdfDocument, tocEntries);
             }
         }
@@ -245,6 +250,19 @@ public class DocxToPdfConverter : IFileConverter
             EndnoteIdsEncountered = endnoteIdsEncountered,
             BookmarkTracker = bookmarkTracker,
             FieldResolver = instr => ResolveField(instr, docxDocument, null) // 简化：不传递 docxPath
+        };
+        paragraphConverter.HeadingRendered = (key, title, level, pageNumber) =>
+        {
+            if (expectedTocKeys == null || !expectedTocKeys.Contains(key))
+                return;
+
+            if (!tocPageNumbersByKey.TryGetValue(key, out var pages))
+            {
+                pages = new Queue<int>();
+                tocPageNumbersByKey[key] = pages;
+            }
+
+            pages.Enqueue(pageNumber);
         };
         var imageConverter = new DocxImageConverter(docxDocument, _options);
         var listConverter = new ListConverter(fontHelper, styles, colorScheme);
@@ -580,6 +598,8 @@ public class DocxToPdfConverter : IFileConverter
         pdfDocument.Close();
         writer.Close();
 
+        paragraphConverter.HeadingRendered = null;
+
         if (hasHeaderFooter && tempStream != null && headerFooterRenderer != null)
         {
             StampHeaderFooter(tempStream, pdfStream, headerFooterRenderer, sectionTracker);
@@ -599,6 +619,8 @@ public class DocxToPdfConverter : IFileConverter
         // 更新目录页码
         if (_options.GenerateTableOfContents && tocEntries.Count > 0)
         {
+            ApplyRecordedTocPageNumbers(tocEntries, tocPageNumbersByKey);
+
             pdfStream.Position = 0;
             using var reader = new PdfReader(pdfStream);
             using var outputStream = new MemoryStream();
@@ -613,8 +635,12 @@ public class DocxToPdfConverter : IFileConverter
                 var tocPageTextMap = new Dictionary<int, string>();
                 for (var tocIndex = 0; tocIndex < tocEntries.Count; tocIndex++)
                 {
-                    var targetPage = tocIndex + 2;
-                    if (targetPage > totalPages) targetPage = totalPages;
+                    var targetPage = tocEntries[tocIndex].PageNumber;
+                    if (targetPage <= 0)
+                        targetPage = Math.Min(tocIndex + 2, totalPages);
+                    else if (targetPage > totalPages)
+                        targetPage = totalPages;
+
                     tocPageTextMap[tocIndex] = targetPage.ToString();
                 }
 
@@ -676,10 +702,24 @@ public class DocxToPdfConverter : IFileConverter
 
             para.Add(new iTextChunk(" ", contentFont));
 
-            var pageNumChunk = new iTextChunk("1", pageNumFont);
+            var pageNumChunk = new iTextChunk("    ", pageNumFont);
             para.Add(pageNumChunk);
 
             pdfDocument.Add(para);
+        }
+    }
+
+    private static void ApplyRecordedTocPageNumbers(
+        List<TableOfContentsGenerator.TOCEntry> entries,
+        Dictionary<string, Queue<int>> tocPageNumbersByKey)
+    {
+        foreach (var entry in entries)
+        {
+            var key = TableOfContentsGenerator.BuildEntryKey(entry);
+            if (tocPageNumbersByKey.TryGetValue(key, out var pages) && pages.Count > 0)
+            {
+                entry.PageNumber = pages.Dequeue();
+            }
         }
     }
 
@@ -1068,13 +1108,11 @@ public class DocxToPdfConverter : IFileConverter
     /// </summary>
     private string? ParseHyperlinkField(string instruction)
     {
-        // 提取 URL：HYPERLINK "http://example.com"
+        // 提取 URL：HYPERLINK "http://example.com"。
+        // 文本内容由字段本身的子元素提供，点击行为将在段落转换时附加锚点。
         var match = System.Text.RegularExpressions.Regex.Match(instruction, @"HYPERLINK\s+""([^""]+)""");
         if (!match.Success) return null;
-        
-        var url = match.Groups[1].Value;
-        // TODO: 返回可点击的文本（需要 Chunk 支持）
-        return url;
+        return match.Groups[1].Value;
     }
     
     /// <summary>

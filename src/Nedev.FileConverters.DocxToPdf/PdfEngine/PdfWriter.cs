@@ -216,6 +216,8 @@ public class PdfWriter : IDisposable
 
     private readonly Dictionary<int, string> _pageDirectContents = [];
     private int _currentPageDirectContentIdx = 1;
+    private bool _pageEventOpened;
+    private bool _pageEventClosed;
     private AnnotationCollection? _annotations;
     private PdfEncryption? _encryption;
     private string? _pdfTitle;
@@ -259,12 +261,25 @@ public class PdfWriter : IDisposable
 
     private void OnPageAdded(object? sender, PdfPage page)
     {
+        if (_pageEvent != null && !_pageEventOpened)
+        {
+            _pageEvent.OnOpenDocument(this, _document);
+            _pageEventOpened = true;
+        }
+
+        if (_pageEvent != null && page.PageNumber > 1)
+        {
+            _pageEvent.OnEndPage(this, _document);
+        }
+
         if (_currentPageDirectContentIdx <= _document.PageNumber)
         {
             _pageDirectContents[_currentPageDirectContentIdx] = _directContent.GetContent();
         }
         _directContent.Clear();
         _currentPageDirectContentIdx = page.PageNumber;
+
+        _pageEvent?.OnStartPage(this, _document);
     }
 
     public static PdfWriter GetInstance(PdfDocument document, Stream outputStream)
@@ -1699,6 +1714,23 @@ public class PdfWriter : IDisposable
 
     public void Close()
     {
+        if (!_pageEventClosed && _pageEvent != null)
+        {
+            if (!_pageEventOpened)
+            {
+                _pageEvent.OnOpenDocument(this, _document);
+                _pageEventOpened = true;
+            }
+
+            if (_document.PageNumber > 0)
+            {
+                _pageEvent.OnEndPage(this, _document);
+            }
+
+            _pageEvent.OnCloseDocument(this, _document);
+            _pageEventClosed = true;
+        }
+
         if (_document != null && _outputStream != null)
         {
             WriteDocument();

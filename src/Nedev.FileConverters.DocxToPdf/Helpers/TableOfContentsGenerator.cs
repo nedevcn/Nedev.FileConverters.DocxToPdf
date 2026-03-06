@@ -22,6 +22,19 @@ public static class TableOfContentsGenerator
         public string? BookmarkId { get; set; }
     }
 
+    public static string BuildEntryKey(TOCEntry entry)
+    {
+        return BuildEntryKey(entry.Title, entry.Level, entry.BookmarkId);
+    }
+
+    public static string BuildEntryKey(string title, int level, string? bookmarkId)
+    {
+        if (!string.IsNullOrWhiteSpace(bookmarkId))
+            return $"bookmark:{bookmarkId.Trim()}";
+
+        return $"heading:{Math.Clamp(level, 1, 9)}:{title.Trim()}";
+    }
+
     /// <summary>
     /// ??????????
     /// </summary>

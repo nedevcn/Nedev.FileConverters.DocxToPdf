@@ -160,6 +160,10 @@ public class Paragraph : Phrase
     public float SpacingAfter { get; set; }
     public float MultipliedLeading { get; set; } = 1.2f;
     public bool KeepTogether { get; set; }
+    public string? OutlineKey { get; set; }
+    public string? OutlineTitle { get; set; }
+    public int? OutlineLevel { get; set; }
+    public Action<Paragraph, int>? RenderedCallback { get; set; }
 
     public new int Type => 2;
 

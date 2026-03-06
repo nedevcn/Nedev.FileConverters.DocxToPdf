@@ -14,6 +14,9 @@ namespace Nedev.FileConverters.DocxToPdf.Converters;
 /// </summary>
 public class ParagraphConverter
 {
+    // debug output buffer (used by tests to inspect parsing behaviour)
+    public static System.Text.StringBuilder DebugLog { get; } = new System.Text.StringBuilder();
+
     private readonly FontHelper _fontHelper;
     private readonly Styles? _styles;
     private readonly OpenXmlElement? _colorScheme;
@@ -30,6 +33,9 @@ public class ParagraphConverter
 
     /// <summary>书签跟踪器，用于添加标题书签</summary>
     public object? BookmarkTracker { get; set; }
+
+    /// <summary>标题真正落版时回调，供目录等后处理记录实际页码</summary>
+    public Action<string, string, int, int>? HeadingRendered { get; set; }
 
     /// <summary>字段解析器：输入完整指令字符串（如 \"DATE \\@ yyyy-MM-dd\"），返回要显示的文本</summary>
     public Func<string, string?>? FieldResolver { get; set; }
@@ -215,12 +221,74 @@ public class ParagraphConverter
         // 段落控制：KeepWithNext、KeepLinesTogether
         ApplyParagraphKeepOptions(pdfParagraph, paraProps, styleId);
 
+        // 当正在处理由字段（SimpleField 或复杂字段）产生的超链接时，临时保存 URL，
+        // 以便 AppendInline 在生成 Chunk 时添加 anchor 属性。
+        string? currentFieldHref = null;
+
+        // 复杂字段解析状态
+        string? currentComplexInstr = null;
+        bool inComplexField = false;
+        bool complexFieldHasSeparator = false;
+
         var hasContent = false;
 
         void AppendInline(OpenXmlElement element)
         {
             switch (element)
             {
+                case DocumentFormat.OpenXml.Wordprocessing.FieldChar fieldChar:
+                    // 传统复杂字段结构由 FieldChar 开始/分隔/结束
+                    if (fieldChar.FieldCharType != null)
+                    {
+                        var type = fieldChar.FieldCharType.Value;
+                        if (type == FieldCharValues.Begin)
+                        {
+                            DebugLog.AppendLine("[Converter] FieldChar Begin encountered");
+                            inComplexField = true;
+                            complexFieldHasSeparator = false;
+                            currentComplexInstr = string.Empty;
+                        }
+                        else if (type == FieldCharValues.Separate)
+                        {
+                            DebugLog.AppendLine($"[Converter] FieldChar Separate encountered; instr='{currentComplexInstr}'");
+                            complexFieldHasSeparator = true;
+
+                            // 如果字段是超链接，请从解析器获取 URL 并激活锚点
+                            if (!string.IsNullOrEmpty(currentComplexInstr) &&
+                                currentComplexInstr.TrimStart().ToUpperInvariant().StartsWith("HYPERLINK"))
+                            {
+                                currentFieldHref = FieldResolver?.Invoke(currentComplexInstr);
+                                DebugLog.AppendLine($"[Converter] Resolved hyperlink target: {currentFieldHref}");
+                            }
+                        }
+                        else if (type == FieldCharValues.End)
+                        {
+                            // 当字段结束时，如果文档中没有提供显示文本（即未出现分隔符），
+                            // 则使用 ProcessComplexField 生成输出；否则内容已经由后续 Run 处理。
+                            if (!complexFieldHasSeparator && !string.IsNullOrEmpty(currentComplexInstr))
+                            {
+                                var cmd = currentComplexInstr.Trim().Split(' ', '\t')[0].ToUpperInvariant();
+                                if (cmd != "HYPERLINK")
+                                {
+                                    ProcessComplexField(currentComplexInstr, pdfParagraph, ref hasContent, isHeading, headingSize, runProps, paraRunProps, actualFontSize, forceBold);
+                                }
+                            }
+
+                            inComplexField = false;
+                            currentComplexInstr = null;
+                            currentFieldHref = null; // 清除链接状态
+                            complexFieldHasSeparator = false;
+                        }
+                    }
+                    break;
+
+                case DocumentFormat.OpenXml.Wordprocessing.FieldCode fieldCode:
+                    if (inComplexField && !complexFieldHasSeparator && fieldCode.InnerText != null)
+                    {
+                        currentComplexInstr += fieldCode.InnerText;
+                    }
+                    break;
+
                 case BookmarkStart bookmarkStart:
                     var bmName = bookmarkStart.Name?.Value;
                     if (!string.IsNullOrEmpty(bmName) && BookmarkTracker is BookmarkTracker tracker)
@@ -245,6 +313,22 @@ public class ParagraphConverter
                     break;
                     
                 case Run run:
+                    // 先检查嵌套的字段相关元素，让状态机响应 Begin/Separate/End
+                    foreach (var nested in run.ChildElements)
+                    {
+                        if (nested is DocumentFormat.OpenXml.Wordprocessing.FieldChar ||
+                            nested is DocumentFormat.OpenXml.Wordprocessing.FieldCode)
+                        {
+                            AppendInline(nested);
+                        }
+                    }
+
+                    // 如果当前正在处理复杂字段的指令部分，则忽略剩余内容
+                    if (inComplexField && !complexFieldHasSeparator)
+                    {
+                        break;
+                    }
+
                     // 检查是否在删除的修订中
                     if (IsDeletedRevision(run))
                     {
@@ -294,6 +378,16 @@ public class ParagraphConverter
                                 var newStyle = chunk.Font.Style | iTextFont.STRIKETHRU;
                                 var newFont = new iTextFont(chunk.Font.Family, chunk.Font.Size, newStyle, new BaseColor(150, 0, 0));
                                 chunk.Font = newFont;
+                            }
+
+                            // 如果当前段落处于字段超链接上下文，附加锚点
+                            if (!string.IsNullOrEmpty(currentFieldHref))
+                            {
+                                // 若原本已有锚点，则保留它
+                                if (string.IsNullOrEmpty(chunk.Anchor))
+                                {
+                                    chunk.SetAnchor(currentFieldHref);
+                                }
                             }
                             
                             pdfParagraph.Add(chunk);
@@ -373,6 +467,18 @@ public class ParagraphConverter
                             pdfParagraph.Add(new iTextChunk(display, fieldFont));
                             hasContent = true;
                         }
+                        else if (cmd == "HYPERLINK")
+                        {
+                            // 超链接字段：保持显示文本不变，但将后续生成的所有 Chunk
+                            // 设置为可点击链接。FieldResolver 仍返回 URL。
+                            var link = FieldResolver?.Invoke(instr);
+                            var saved = currentFieldHref;
+                            currentFieldHref = link;
+                            foreach (var child in field.ChildElements)
+                                AppendInline(child);
+                            currentFieldHref = saved;
+                            hasContent = true;
+                        }
                         else
                         {
                             var resolved = FieldResolver?.Invoke(instr);
@@ -408,8 +514,8 @@ public class ParagraphConverter
                     
                 // 复杂字段支持（FieldBegin, FieldSeparator, FieldEnd）
                 // 注意：这些类型在 DocumentFormat.OpenXml SDK 中存在于不同的命名空间
-                // 暂时通过 SimpleField 和 FieldResolver 处理字段
-                // TODO: 未来版本添加完整的复杂字段支持
+                // 目前我们使用 SimpleField + FieldResolver 来处理大多数情况（包括 HYPERLINK 字段），
+                // 日后可进一步增强对传统 FieldChar 结构的完整支持。
             }
         }
 
@@ -428,6 +534,28 @@ public class ParagraphConverter
             pdfParagraph.Add(new iTextChunk(" ", emptyFont));
         }
 
+        string? headingTitle = null;
+        if (isHeading && headingLevel.HasValue && hasContent)
+        {
+            headingTitle = string.Join("", docxParagraph.Descendants<Text>().Select(t => t.Text)).Trim();
+            if (!string.IsNullOrWhiteSpace(headingTitle))
+            {
+                var bookmarkId = docxParagraph.Descendants<BookmarkStart>().FirstOrDefault()?.Name?.Value;
+                pdfParagraph.OutlineTitle = headingTitle;
+                pdfParagraph.OutlineLevel = headingLevel.Value;
+                pdfParagraph.OutlineKey = TableOfContentsGenerator.BuildEntryKey(headingTitle, headingLevel.Value, bookmarkId);
+                pdfParagraph.RenderedCallback = (paragraph, pageNumber) =>
+                {
+                    if (!string.IsNullOrWhiteSpace(paragraph.OutlineKey)
+                        && !string.IsNullOrWhiteSpace(paragraph.OutlineTitle)
+                        && paragraph.OutlineLevel.HasValue)
+                    {
+                        HeadingRendered?.Invoke(paragraph.OutlineKey, paragraph.OutlineTitle, paragraph.OutlineLevel.Value, pageNumber);
+                    }
+                };
+            }
+        }
+
         if (hasContent || !hasPageBreak)
         {
             elements.Add(pdfParagraph);
@@ -436,10 +564,9 @@ public class ParagraphConverter
         // 标题书签
         if (isHeading && headingLevel.HasValue && hasContent && BookmarkTracker is BookmarkTracker tracker)
         {
-            var titleText = string.Join("", docxParagraph.Descendants<Text>().Select(t => t.Text));
-            if (!string.IsNullOrWhiteSpace(titleText))
+            if (!string.IsNullOrWhiteSpace(headingTitle))
             {
-                tracker.AddHeadingBookmark(titleText.Trim(), headingLevel.Value);
+                tracker.AddHeadingBookmark(headingTitle, headingLevel.Value);
             }
         }
 
