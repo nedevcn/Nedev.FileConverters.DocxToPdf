@@ -42,13 +42,42 @@ public class PdfContentByte
         _content.Append($"{x:F2} {y:F2} {width:F2} {height:F2} re\n");
 
     public void BeginText() => _content.Append("BT\n");
-    public void EndText() => _content.Append("ET\n");
+    // 文本矩阵缓存，减少冗余指令
+    private float[]? _currentTextMatrix;
+
+    public void EndText()
+    {
+        _content.Append("ET\n");
+        _currentTextMatrix = null;
+    }
 
     public void SetFontAndSize(string fontName, float size) =>
         _content.Append($"/{fontName} {size:F2} Tf\n");
 
-    public virtual void SetTextMatrix(float a, float b, float c, float d, float e, float f) =>
+    public virtual void SetTextMatrix(float a, float b, float c, float d, float e, float f)
+    {
+        // 简单比较，如果完全一致则跳过
+        if (_currentTextMatrix != null &&
+            Math.Abs(_currentTextMatrix[0] - a) < 0.001f &&
+            Math.Abs(_currentTextMatrix[1] - b) < 0.001f &&
+            Math.Abs(_currentTextMatrix[2] - c) < 0.001f &&
+            Math.Abs(_currentTextMatrix[3] - d) < 0.001f &&
+            Math.Abs(_currentTextMatrix[4] - e) < 0.01f &&
+            Math.Abs(_currentTextMatrix[5] - f) < 0.01f)
+        {
+            return;
+        }
+
         _content.Append($"{a:F3} {b:F3} {c:F3} {d:F3} {e:F2} {f:F2} Tm\n");
+        
+        if (_currentTextMatrix == null) _currentTextMatrix = new float[6];
+        _currentTextMatrix[0] = a;
+        _currentTextMatrix[1] = b;
+        _currentTextMatrix[2] = c;
+        _currentTextMatrix[3] = d;
+        _currentTextMatrix[4] = e;
+        _currentTextMatrix[5] = f;
+    }
 
     public virtual void ShowText(string text)
     {
@@ -804,7 +833,27 @@ public class PdfWriter : IDisposable
         cb.SetColorFill(chunk.Font.Color);
 
         // 计算文本基线位置
-        var textBaselineY = y - chunk.Font.Size * 0.8f + chunk.TextRise;
+        // 尝试使用真实字体度量
+        float textBaselineY;
+        var fontRef = GetFontReference(chunk.Font);
+        if (fontRef != null && fontRef.IsChineseFont && _parsedFont != null)
+        {
+            // TrueType 度量：Ascent 通常为正，Descent 通常为负，UnitsPerEm 为基准
+            // 基线 = y (Top) - AscentScaled
+            // 但这里 y 传入的是什么？通常是 Top。
+            // 假设 y 是 Top，则基线在 y - AscentScaled。
+            // 需注意：iText/PDF 坐标系中，字号本身就是缩放因子。
+            // 字体度量是以 UnitsPerEm 为单位的整数。
+            // 缩放比例 = fontSize / UnitsPerEm
+            float scale = chunk.Font.Size / _parsedFont.UnitsPerEm;
+            float ascent = _parsedFont.Ascent * scale;
+            textBaselineY = y - ascent + chunk.TextRise;
+        }
+        else
+        {
+            // 默认估算：基线在 Top 下方约 0.8 * Size 处
+            textBaselineY = y - chunk.Font.Size * 0.8f + chunk.TextRise;
+        }
 
         // 获取正确的PDF字体名称
         var fontPdfName = GetFontPdfName(chunk.Font);
@@ -827,6 +876,12 @@ public class PdfWriter : IDisposable
         cb.RestoreState();
 
         return y;
+    }
+
+    private PdfFontReference? GetFontReference(Font font)
+    {
+        var key = $"{font.Family}_{font.Style}";
+        return _fontRegistry.TryGetValue(key, out var reference) ? reference : null;
     }
 
     private float RenderPhrase(PdfContentByte cb, Phrase phrase, float x, float y)

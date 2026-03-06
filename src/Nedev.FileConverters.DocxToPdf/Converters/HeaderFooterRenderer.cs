@@ -159,7 +159,7 @@ internal class HeaderFooterRenderer
     /// <summary>
     /// ????????????(????? PdfStamper ??)
     /// </summary>
-    public void Render(PdfContentByte cb, Rectangle pageSize, int pageNum, int totalPages, int sectionIndex, int pageNumInSection)
+    public void Render(PdfContentByte cb, Rectangle pageSize, int pageNum, int totalPages, int sectionIndex, int pageNumInSection, SectionPageSettings settings)
     {
         var (headerBody, footerBody) = GetForPage(sectionIndex, pageNum, pageNumInSection);
         if (headerBody == null && footerBody == null) return;
@@ -168,25 +168,46 @@ internal class HeaderFooterRenderer
 
         var pageHeight = pageSize.Height;
         var pageWidth = pageSize.Width;
-        var marginL = _options.MarginLeft;
-        var marginR = _options.MarginRight;
-        var marginT = _options.MarginTop;
-        var marginB = _options.MarginBottom;
+        var marginL = settings.MarginLeft;
+        var marginR = settings.MarginRight;
+        var marginT = settings.MarginTop;
+        var marginB = settings.MarginBottom;
+        var headerDist = settings.HeaderDistance;
+        var footerDist = settings.FooterDistance;
 
         if (headerBody != null)
         {
             var headerHeight = MeasureHeight(headerBody, pageWidth - marginL - marginR);
+            // Header position: usually from top edge downwards by HeaderDistance
+            // But we render upwards from bottom? No, PDF coords.
+            // Header top is pageHeight - HeaderDistance.
+            // Or Header baseline?
+            // Usually HeaderDistance is from edge to top of header.
+            // So Y = pageHeight - HeaderDistance - headerHeight (if top aligned)
+            // Or Y range: pageHeight - HeaderDistance (top) to pageHeight - MarginTop (bottom)?
+            // Word: Header is inside the top margin area.
+            // Header starts at HeaderDistance from top.
+            
+            float headerY = pageHeight - headerDist;
+            // Ensure header fits within margin?
+            // If header is tall, it pushes body down? Not in this simple renderer.
+            // We just render it.
+            
             RenderBody(cb, headerBody,
-                marginL, pageHeight - marginT - headerHeight,
-                pageWidth - marginR, pageHeight - marginT + 20f);
+                marginL, headerY - headerHeight,
+                pageWidth - marginR, headerY);
         }
 
         if (footerBody != null)
         {
             var footerHeight = MeasureHeight(footerBody, pageWidth - marginL - marginR);
+            // Footer position: from bottom edge upwards by FooterDistance
+            // Footer starts at FooterDistance from bottom.
+            float footerY = footerDist;
+            
             RenderBody(cb, footerBody,
-                marginL, marginB - 20f,
-                pageWidth - marginR, marginB + footerHeight);
+                marginL, footerY,
+                pageWidth - marginR, footerY + footerHeight);
         }
     }
 

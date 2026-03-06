@@ -33,6 +33,16 @@ public class ConvertOptions
     public float MarginBottom { get; set; } = 72f;
 
     /// <summary>
+    /// 页眉距边界距离（pt），默认 36pt (0.5 inch)
+    /// </summary>
+    public float HeaderDistance { get; set; } = 36f;
+
+    /// <summary>
+    /// 页脚距边界距离（pt），默认 36pt (0.5 inch)
+    /// </summary>
+    public float FooterDistance { get; set; } = 36f;
+
+    /// <summary>
     /// 默认字体名称（用于中文推荐使用 "STSong-Light" 或系统已注册的字体）
     /// </summary>
     public string DefaultFontName { get; set; } = "STSong-Light";
@@ -151,6 +161,33 @@ public class ConvertOptions
     /// 默认选项
     /// </summary>
     public static ConvertOptions Default => new();
+
+    /// <summary>
+    /// 当前节的行号设置
+    /// </summary>
+    public LineNumberSettings? LineNumberSettings { get; set; }
+}
+
+/// <summary>
+/// 行号设置
+/// </summary>
+public class LineNumberSettings
+{
+    /// <summary>起始编号</summary>
+    public int Start { get; set; } = 1;
+    /// <summary>行号增量（每隔几行显示一次），默认 1</summary>
+    public int CountBy { get; set; } = 1;
+    /// <summary>距正文距离（pt），默认 0（自动）</summary>
+    public float Distance { get; set; } = 0; // twips / 20 -> pt
+    /// <summary>重置模式：continuous, newPage, newSection</summary>
+    public LineNumberRestartMode RestartMode { get; set; } = LineNumberRestartMode.Continuous;
+}
+
+public enum LineNumberRestartMode
+{
+    Continuous, // 连续
+    NewPage,    // 每页重置
+    NewSection  // 每节重置
 }
 
 /// <summary>

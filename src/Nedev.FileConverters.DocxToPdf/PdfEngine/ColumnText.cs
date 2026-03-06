@@ -1,3 +1,5 @@
+using Nedev.FileConverters.DocxToPdf.Models;
+
 namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 
 /// <summary>
@@ -21,6 +23,11 @@ public class ColumnText
     public const int NO_MORE_COLUMN = 1;
     public const int NO_MORE_TEXT = 2;
 
+    // 行号相关
+    public LineNumberSettings? LineNumberSettings { get; set; }
+    public int CurrentLineNumber { get; set; } = 1;
+    private int _lastPageNumber = 0;
+
     public ColumnText(PdfContentByte canvas)
     {
         _canvas = canvas;
@@ -33,7 +40,15 @@ public class ColumnText
 
     public void SetCurrentPage(int pageNumber)
     {
-        _currentPageNumber = pageNumber;
+        if (_currentPageNumber != pageNumber)
+        {
+            _currentPageNumber = pageNumber;
+            // 处理每页重置行号
+            if (LineNumberSettings?.RestartMode == LineNumberRestartMode.NewPage)
+            {
+                CurrentLineNumber = LineNumberSettings.Start;
+            }
+        }
     }
 
     public void SetSimpleColumn(float llx, float lly, float urx, float ury)
@@ -188,6 +203,34 @@ public class ColumnText
             foreach (var chunk in chunks)
             {
                 currentX = RenderChunk(chunk, currentX, y, simulate);
+            }
+
+            // 绘制行号
+            if (!simulate && LineNumberSettings != null)
+            {
+                if (CurrentLineNumber % LineNumberSettings.CountBy == 0)
+                {
+                    float lnX = _llx - LineNumberSettings.Distance;
+                    // 行号通常右对齐到距离位置？Word是右对齐到 margin - distance。
+                    // 简单实现：左对齐或右对齐
+                    // 这里假设 LineNumberSettings.Distance 是距离正文的间距
+                    // 那么行号应该画在 _llx - Distance - (行号宽度) 
+                    // 简化：画在 _llx - Distance 处，右对齐
+                    
+                    _canvas.SaveState();
+                    _canvas.BeginText();
+                    _canvas.SetFontAndSize("F1", para.Font.Size); // 使用段落字体大小? 还是固定? Word通常使用"行号"样式。这里简化用段落字号。
+                    
+                    var lnText = CurrentLineNumber.ToString();
+                    // 简单估算宽度
+                    float lnWidth = lnText.Length * para.Font.Size * 0.5f; 
+                    
+                    _canvas.SetTextMatrix(1, 0, 0, 1, lnX - lnWidth, y - para.Font.Size * 0.8f);
+                    _canvas.ShowText(lnText);
+                    _canvas.EndText();
+                    _canvas.RestoreState();
+                }
+                CurrentLineNumber++;
             }
 
             y -= lineHeight;

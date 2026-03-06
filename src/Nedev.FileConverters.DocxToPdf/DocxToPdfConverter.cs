@@ -45,6 +45,22 @@ namespace Nedev.FileConverters.DocxToPdf;
 public class DocxToPdfConverter : IFileConverter
 {
     private readonly ConvertOptions _options;
+    
+    private readonly Dictionary<int, SectionPageSettings> _sectionSettingsMap = new();
+
+    private void CaptureSectionSettings(int sectionIndex)
+    {
+        _sectionSettingsMap[sectionIndex] = new SectionPageSettings
+        {
+            PageSize = _options.PageSize,
+            MarginLeft = _options.MarginLeft,
+            MarginRight = _options.MarginRight,
+            MarginTop = _options.MarginTop,
+            MarginBottom = _options.MarginBottom,
+            HeaderDistance = _options.HeaderDistance,
+            FooterDistance = _options.FooterDistance
+        };
+    }
 
     private ColumnInfo _currentColumnInfo = new();
 
@@ -153,9 +169,15 @@ public class DocxToPdfConverter : IFileConverter
             allSections.Add(body.Elements<SectionProperties>().First());
 
         if (allSections.Count > 0)
+        {
             ApplyPageSettings(allSections[0]);
+            CaptureSectionSettings(0);
+        }
         else
+        {
             _currentColumnInfo = new ColumnInfo(); // Default
+            CaptureSectionSettings(0);
+        }
 
         var pageWidth = GetColumnWidth();
         var numberingPart = mainPart.NumberingDefinitionsPart;
@@ -216,6 +238,8 @@ public class DocxToPdfConverter : IFileConverter
         // 多栏排版管理器（需要尽早初始化以便设置页码）
         var ct = new ColumnText(writer.DirectContent);
         ct.SetAnnotationCollection(annotations);
+        ct.LineNumberSettings = _options.LineNumberSettings;
+        if (_options.LineNumberSettings != null) ct.CurrentLineNumber = _options.LineNumberSettings.Start;
 
         // 书签支持
         var bookmarkTracker = new global::Nedev.FileConverters.DocxToPdf.PdfEngine.BookmarkTracker(writer);
@@ -376,10 +400,18 @@ public class DocxToPdfConverter : IFileConverter
                         if (currentSectionIndex < allSections.Count)
                         {
                             ApplyPageSettings(allSections[currentSectionIndex]);
+                            CaptureSectionSettings(currentSectionIndex);
                         }
                         if (hasHeaderFooter) sectionTracker.CurrentSection = currentSectionIndex;
                         sectionBreakEncountered = false;
                         ApplyCurrentPageSettings(pdfDocument);
+
+                        // 更新行号设置
+                        ct.LineNumberSettings = _options.LineNumberSettings;
+                        if (_options.LineNumberSettings?.RestartMode == LineNumberRestartMode.NewSection)
+                        {
+                            ct.CurrentLineNumber = _options.LineNumberSettings.Start;
+                        }
                     }
 
                     pdfDocument.NewPage();
@@ -602,7 +634,7 @@ public class DocxToPdfConverter : IFileConverter
 
         if (hasHeaderFooter && tempStream != null && headerFooterRenderer != null)
         {
-            StampHeaderFooter(tempStream, pdfStream, headerFooterRenderer, sectionTracker);
+            StampHeaderFooter(tempStream, pdfStream, headerFooterRenderer, sectionTracker, _sectionSettingsMap);
         }
 
         // 应用水印（在所有其他内容之后）
@@ -723,7 +755,12 @@ public class DocxToPdfConverter : IFileConverter
         }
     }
 
-    private void StampHeaderFooter(MemoryStream sourcePdf, Stream outputStream, HeaderFooterRenderer renderer, SectionTracker tracker)
+    private void StampHeaderFooter(
+        MemoryStream sourcePdf, 
+        Stream outputStream, 
+        HeaderFooterRenderer renderer, 
+        SectionTracker tracker,
+        Dictionary<int, SectionPageSettings> sectionSettings)
     {
         sourcePdf.Position = 0;
         using var reader = new PdfReader(sourcePdf.ToArray());
@@ -751,7 +788,11 @@ public class DocxToPdfConverter : IFileConverter
             var cb = stamper.GetOverContent(p);
             var pageSize = reader.GetPageSize(p);
             
-            renderer.Render(cb, pageSize, p, totalPages, sectionIndex, pageNumInSection[p]);
+            // Get settings
+            if (!sectionSettings.TryGetValue(sectionIndex, out var settings))
+                settings = sectionSettings.GetValueOrDefault(0) ?? new SectionPageSettings();
+
+            renderer.Render(cb, pageSize, p, totalPages, sectionIndex, pageNumInSection[p], settings);
         }
     }
 
@@ -1440,6 +1481,10 @@ public class DocxToPdfConverter : IFileConverter
             if (pageMargin.Right?.Value is uint mr) _options.MarginRight = mr / 20f;
             if (pageMargin.Top?.Value is int mt) _options.MarginTop = Math.Abs(mt) / 20f;
             if (pageMargin.Bottom?.Value is int mb) _options.MarginBottom = Math.Abs(mb) / 20f;
+            
+            // Header/Footer distance
+            if (pageMargin.Header?.Value is uint h) _options.HeaderDistance = h / 20f;
+            if (pageMargin.Footer?.Value is uint f) _options.FooterDistance = f / 20f;
         }
 
         // 多栏支持
@@ -1459,6 +1504,39 @@ public class DocxToPdfConverter : IFileConverter
         else
         {
             _currentColumnInfo = new ColumnInfo();
+        }
+
+        // 行号支持
+        var lineNumType = sectionProps.GetFirstChild<LineNumberType>();
+        if (lineNumType != null)
+        {
+            var settings = new LineNumberSettings();
+            
+            // start
+            settings.Start = (int)(lineNumType.Start?.Value ?? 1);
+                
+            // countBy
+            settings.CountBy = (int)(lineNumType.CountBy?.Value ?? 1); 
+            
+            // distance (twips)
+            if (lineNumType.Distance?.Value is string distStr && float.TryParse(distStr, out var dist))
+                settings.Distance = dist / 20f;
+            else
+                settings.Distance = 0.25f * 72f; // Default ~0.25 inch
+                
+            // restart
+            if (lineNumType.Restart?.Value == LineNumberRestartValues.NewPage)
+                settings.RestartMode = LineNumberRestartMode.NewPage;
+            else if (lineNumType.Restart?.Value == LineNumberRestartValues.NewSection)
+                settings.RestartMode = LineNumberRestartMode.NewSection;
+            else
+                settings.RestartMode = LineNumberRestartMode.Continuous;
+
+            _options.LineNumberSettings = settings;
+        }
+        else
+        {
+            _options.LineNumberSettings = null;
         }
     }
 
