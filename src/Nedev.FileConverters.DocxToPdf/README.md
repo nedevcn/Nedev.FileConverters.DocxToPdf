@@ -91,6 +91,4 @@ services.AddDocxToPdf();
 
 ## 📄 License
 
-This project is released under the [MIT License](../LICENSE).
-
-The same license is included in the NuGet package via `PackageLicenseExpression`.
+[Insert License Information Here]

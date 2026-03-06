@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Nedev.FileConverters.DocxToPdf</RootNamespace>
+    <AssemblyName>Nedev.FileConverters.DocxToPdf</AssemblyName>
+    <Version>0.1.0</Version>
+    <Description>A .NET library for converting DOCX files to PDF using custom PDF engine</Description>
+    <!-- NuGet packaging metadata -->
+    <Authors>nedevcn</Authors>
+    <PackageTags>docx,pdf,conversion,fileconverters</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/nedevcn/Nedev.FileConverters.DocxToPdf</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/nedevcn/Nedev.FileConverters.DocxToPdf</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.*" />
+    <PackageReference Include="Nedev.FileConverters.Core" Version="0.1.0" />
+    <PackageReference Include="SkiaSharp" Version="3.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- include README in the nuget package -->
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+</Project>

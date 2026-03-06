@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Solution Format="12.00" VisualStudioVersion="17.5.2.0" MinimumVisualStudioVersion="10.0.40219.1" Guid="{6ECACCAF-6CE5-4766-B38D-7734D522629B}">
+  <Projects>
+    <Project TypeGuid="{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}" Name="Nedev.FileConverters.DocxToPdf" Path="Nedev.FileConverters.DocxToPdf\Nedev.FileConverters.DocxToPdf.csproj" Guid="{48BF56EC-F181-6F5E-1C95-74136CEA6CB3}" />
+    <Project TypeGuid="{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}" Name="Nedev.FileConverters.DocxToPdf.Cli" Path="Nedev.FileConverters.DocxToPdf.Cli\Nedev.FileConverters.DocxToPdf.Cli.csproj" Guid="{2F94B7D4-1FCB-459F-9F29-45A7684DBA79}" />
+  </Projects>
+</Solution>
