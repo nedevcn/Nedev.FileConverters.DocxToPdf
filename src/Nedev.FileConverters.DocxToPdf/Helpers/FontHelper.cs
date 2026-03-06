@@ -54,6 +54,9 @@ public class FontHelper
         }
 
         // ????????
+        // 初始化系统字体映射
+        SystemFontProvider.Initialize();
+
         if (OperatingSystem.IsWindows())
         {
             var winFontDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts");
@@ -102,34 +105,34 @@ public class FontHelper
     }
 
     /// <summary>
-    /// ????????(??????)
+    /// 获取默认中文字体（带回退机制）
     /// </summary>
     public string GetDefaultFontName()
     {
-        // ???????????
+        // 尝试常见的跨平台中文字体名称
         var chineseFontNames = new[]
         {
-            "SimSun", "simsun", "NSimSun", "Microsoft YaHei", "msyh",
+            "Microsoft YaHei", "SimSun", "NSimSun", 
             "SimHei", "KaiTi", "FangSong", "STFangsong", "STSong",
             "PingFang SC", "Hiragino Sans GB", "WenQuanYi Micro Hei"
         };
 
         foreach (var fontName in chineseFontNames)
         {
+            // 优先检查 FontFactory 注册的
             try
             {
                 if (FontFactory.IsRegistered(fontName))
-                {
                     return fontName;
-                }
             }
-            catch
-            {
-                // ??,???????
-            }
+            catch { }
+            
+            // 其次检查系统映射表
+            if (SystemFontProvider.GetFontPath(fontName) != null)
+                return fontName;
         }
 
-        // ?? fallback:?? Helvetica
+        // 终极 fallback：默认使用 Helvetica（仅英文）或第一个可用的中文字体
         return "Helvetica";
     }
     /// <summary>

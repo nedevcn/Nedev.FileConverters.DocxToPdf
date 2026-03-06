@@ -1265,54 +1265,69 @@ public class PdfWriter : IDisposable
         // 尝试找到并解析字体文件
         TryLoadChineseFontFile(fontName);
 
-        Console.WriteLine($"Using Chinese font: {fontName}");
+        // 如果找不到指定的中文字体，尝试使用系统默认
+        if (_parsedFont == null)
+        {
+            var fallback = Nedev.FileConverters.DocxToPdf.Helpers.SystemFontProvider.GetFontPath("Microsoft YaHei") 
+                           ?? Nedev.FileConverters.DocxToPdf.Helpers.SystemFontProvider.GetFontPath("SimSun");
+                           
+            if (fallback != null)
+            {
+                TryLoadFontFromPath(fallback);
+                _chineseFontName = Path.GetFileNameWithoutExtension(fallback);
+            }
+        }
+
+        Console.WriteLine($"Using Chinese font: {_chineseFontName} (Loaded: {_parsedFont != null})");
     }
 
     private void TryLoadChineseFontFile(string fontName)
     {
+        // 1. 使用 SystemFontProvider 查找
+        var path = Nedev.FileConverters.DocxToPdf.Helpers.SystemFontProvider.GetFontPath(fontName);
+        if (path != null)
+        {
+            TryLoadFontFromPath(path);
+            return;
+        }
+
+        // 2. 传统扫描（保留兼容性，虽然 SystemFontProvider 已覆盖大部分）
         var fontDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts));
         if (!Directory.Exists(fontDir))
         {
-            fontDir = @"C:\Windows\Fonts";
+             if (OperatingSystem.IsWindows())
+                 fontDir = @"C:\Windows\Fonts";
+             else
+                 return; // 非 Windows 且未找到字体，放弃
         }
 
         // 搜索匹配的字体文件
         var searchNames = new[] { fontName, fontName.Replace(" ", "") };
         foreach (var name in searchNames)
         {
-            foreach (var ext in new[] { ".ttf", ".ttc" })
+            foreach (var ext in new[] { ".ttf", ".ttc", ".otf" })
             {
-                var path = Path.Combine(fontDir, name + ext);
-                if (File.Exists(path))
+                var p = Path.Combine(fontDir, name + ext);
+                if (File.Exists(p))
                 {
-                    try
-                    {
-                        _chineseFontPath = path;
-                        _chineseFontData = File.ReadAllBytes(path);
-                        _parsedFont = new TrueTypeFont(_chineseFontData);
-                        return;
-                    }
-                    catch { /* 忽略解析失败 */ }
+                    TryLoadFontFromPath(p);
+                    return;
                 }
             }
         }
+    }
 
-        // 备用：尝试常见中文字体
-        var fallbacks = new[] { "simsun.ttc", "msyh.ttc", "simhei.ttf", "simkai.ttf" };
-        foreach (var fb in fallbacks)
+    private void TryLoadFontFromPath(string path)
+    {
+        try
         {
-            var path = Path.Combine(fontDir, fb);
-            if (File.Exists(path))
-            {
-                try
-                {
-                    _chineseFontPath = path;
-                    _chineseFontData = File.ReadAllBytes(path);
-                    _parsedFont = new TrueTypeFont(_chineseFontData);
-                    return;
-                }
-                catch { /* 忽略 */ }
-            }
+            _chineseFontPath = path;
+            _chineseFontData = File.ReadAllBytes(path);
+            _parsedFont = new TrueTypeFont(_chineseFontData);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load font from {path}: {ex.Message}");
         }
     }
 
@@ -1714,37 +1729,47 @@ public class PdfWriter : IDisposable
 
     public void Close()
     {
-        if (!_pageEventClosed && _pageEvent != null)
+        try
         {
-            if (!_pageEventOpened)
+            if (!_pageEventClosed && _pageEvent != null)
             {
-                _pageEvent.OnOpenDocument(this, _document);
-                _pageEventOpened = true;
+                if (!_pageEventOpened)
+                {
+                    _pageEvent.OnOpenDocument(this, _document);
+                    _pageEventOpened = true;
+                }
+
+                if (_document.PageNumber > 0)
+                {
+                    _pageEvent.OnEndPage(this, _document);
+                }
+
+                _pageEvent.OnCloseDocument(this, _document);
+                _pageEventClosed = true;
             }
 
-            if (_document.PageNumber > 0)
+            if (_document != null && _outputStream != null)
             {
-                _pageEvent.OnEndPage(this, _document);
+                WriteDocument();
             }
-
-            _pageEvent.OnCloseDocument(this, _document);
-            _pageEventClosed = true;
         }
-
-        if (_document != null && _outputStream != null)
+        catch (Exception ex)
         {
-            WriteDocument();
+            Console.WriteLine($"[PdfWriter] Error closing document: {ex.Message}");
         }
-
-        if (CloseStream)
+        finally
         {
-            _outputStream?.Close();
+            if (CloseStream)
+            {
+                _outputStream?.Close();
+            }
         }
     }
 
     public void Dispose()
     {
         Close();
+        GC.SuppressFinalize(this);
     }
 
     private class PdfIndirectObject
