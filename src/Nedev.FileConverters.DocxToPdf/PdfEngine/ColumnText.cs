@@ -125,7 +125,7 @@ public class ColumnText
     private float RenderParagraph(Paragraph para, float x, float y, float width, bool simulate = false)
     {
         var lineHeight = para.Leading + para.Font.Size * para.MultipliedLeading;
-        if (lineHeight <= 0) lineHeight = para.Font?.Size * 1.2f ?? 16f; // Fallback
+        if (lineHeight <= 0) lineHeight = para.Font?.Size * para.MultipliedLeading ?? 16f; // Fallback
 
         y -= para.SpacingBefore;
 
@@ -134,23 +134,66 @@ public class ColumnText
             para.RenderedCallback(para, _currentPageNumber);
         }
 
-        var currentX = x + para.IndentationLeft + para.FirstLineIndent;
+        // calculate the usable width inside paragraph indentations
+        float availableWidth = width - para.IndentationLeft - para.IndentationRight;
+        if (availableWidth < 0) availableWidth = 0;
+
+        // break chunks into lines first so we can compute each line's width
+        var lines = new List<(List<Chunk> chunks, float lineWidth)>();
+        var currentLine = new List<Chunk>();
+        float currentLineWidth = 0;
+        bool firstChunkOnLine = true;
 
         foreach (var chunk in para.Chunks)
         {
-            var chunkWidth = chunk.GetWidth();
-
-            if (currentX + chunkWidth > x + width - para.IndentationRight)
+            var cw = chunk.GetWidth();
+            if (!firstChunkOnLine && currentLineWidth + cw > availableWidth && currentLine.Count > 0)
             {
-                y -= lineHeight;
-                currentX = x + para.IndentationLeft;
+                lines.Add((currentLine, currentLineWidth));
+                currentLine = new List<Chunk>();
+                currentLineWidth = 0;
+                firstChunkOnLine = true;
             }
 
-            RenderChunk(chunk, currentX, y, simulate);
-            currentX += chunkWidth;
+            currentLine.Add(chunk);
+            currentLineWidth += cw;
+            firstChunkOnLine = false;
+        }
+        if (currentLine.Count > 0)
+        {
+            lines.Add((currentLine, currentLineWidth));
         }
 
-        return y - lineHeight - para.SpacingAfter;
+        // render each line applying alignment and indentation
+        bool firstLine = true;
+        foreach (var (chunks, lineWidth) in lines)
+        {
+            float startX = x + para.IndentationLeft;
+            if (firstLine)
+            {
+                startX += para.FirstLineIndent;
+                firstLine = false;
+            }
+
+            if (para.Alignment == Element.ALIGN_CENTER)
+            {
+                startX += Math.Max(0, (availableWidth - lineWidth) / 2f);
+            }
+            else if (para.Alignment == Element.ALIGN_RIGHT)
+            {
+                startX += Math.Max(0, availableWidth - lineWidth);
+            }
+
+            var currentX = startX;
+            foreach (var chunk in chunks)
+            {
+                currentX = RenderChunk(chunk, currentX, y, simulate);
+            }
+
+            y -= lineHeight;
+        }
+
+        return y - para.SpacingAfter;
     }
 
     private float RenderChunk(Chunk chunk, float x, float y, bool simulate = false)

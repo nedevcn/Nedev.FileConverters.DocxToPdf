@@ -47,10 +47,10 @@ public class PdfContentByte
     public void SetFontAndSize(string fontName, float size) =>
         _content.Append($"/{fontName} {size:F2} Tf\n");
 
-    public void SetTextMatrix(float a, float b, float c, float d, float e, float f) =>
+    public virtual void SetTextMatrix(float a, float b, float c, float d, float e, float f) =>
         _content.Append($"{a:F3} {b:F3} {c:F3} {d:F3} {e:F2} {f:F2} Tm\n");
 
-    public void ShowText(string text)
+    public virtual void ShowText(string text)
     {
         var encoded = EncodeTextForPdf(text);
         _content.Append($"{encoded} Tj\n");
