@@ -14,16 +14,19 @@ public class FontHelper
     private readonly ConvertOptions _options;
     private readonly DocumentFormat.OpenXml.OpenXmlElement? _colorScheme;
     private readonly ConcurrentDictionary<string, iTextFont> _fontCache = new();
+    // map common Chinese font names (as they appear in DOCX) to their
+    // English equivalents that iText/FontFactory understands.  Keys are encoded
+    // with \u escapes so the source file remains plain ASCII and avoids
+    // encoding problems on non‑UTF8 systems.
     private static readonly Dictionary<string, string> _fontNameMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        { "????", "Microsoft YaHei" },
-        { "??", "Microsoft YaHei" },
-        { "??", "SimSun" },
-        { "???", "NSimSun" },
-        { "??", "SimHei" },
-        { "??", "KaiTi" },
-        { "??", "FangSong" },
-        { "??", "DengXian" },
+        { "\u5FAE\u8F6F\u96C5\u9ED1", "Microsoft YaHei" }, // 微软雅黑
+        { "\u5B8B\u4F53", "SimSun" },                       // 宋体
+        { "\u65B0\u5B8B\u4F53", "NSimSun" },               // 新宋体
+        { "\u9ED1\u4F53", "SimHei" },                       // 黑体
+        { "\u6977\u4F53", "KaiTi" },                       // 楷体
+        { "\u4F3C\u5B8B", "FangSong" },                    // 仿宋
+        { "\u7B49\u7EBF", "DengXian" },                    // 等线
         { "Microsoft YaHei UI", "Microsoft YaHei" },
         { "Microsoft Yahei", "Microsoft YaHei" }
     };

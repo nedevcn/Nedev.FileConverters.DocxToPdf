@@ -18,16 +18,16 @@ var outputPath = argsList[1];
 
 try
 {
-    // use the shared Converter entry point so that other converters can be used
-    using var inStream = File.OpenRead(inputPath);
-    using var result = Converter.Convert(inStream, "docx", "pdf");
-    using var outStream = File.Create(outputPath);
-    result.CopyTo(outStream);
+    // call the DocxToPdf converter directly; avoid the generic infrastructure
+    // which is useful in library scenarios but not needed for the CLI.
+    // static helpers make a one‑liner possible.
+    DocxToPdfConverter.ConvertFile(inputPath, outputPath);
 
     Console.WriteLine($"Converted '{inputPath}' -> '{outputPath}' successfully.");
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine("Conversion failed: " + ex.Message);
+    // log the entire exception object so inner details and stack trace are shown
+    Console.Error.WriteLine("Conversion failed: " + ex);
     Environment.Exit(1);
 }
