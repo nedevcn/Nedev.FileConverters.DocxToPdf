@@ -43,6 +43,7 @@ namespace Nedev.FileConverters.DocxToPdf;
 public class DocxToPdfConverter : IFileConverter
 {
     private readonly ConvertOptions _options;
+    private string? _docxPath;
     
     private readonly Dictionary<int, Models.SectionPageSettings> _sectionSettingsMap = new();
 
@@ -100,6 +101,7 @@ public class DocxToPdfConverter : IFileConverter
         if (!File.Exists(docxPath))
             throw new FileNotFoundException("DOCX 文件不存在。", docxPath);
 
+        _docxPath = docxPath;
         using var inputStream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var outputStream = File.Create(pdfPath);
         Convert(inputStream, outputStream);
@@ -280,7 +282,7 @@ public class DocxToPdfConverter : IFileConverter
             FootnoteIdsEncountered = footnoteIdsEncountered,
             EndnoteIdsEncountered = endnoteIdsEncountered,
             BookmarkTracker = bookmarkTracker,
-            FieldResolver = instr => ResolveField(instr, docxDocument, null) // 简化：不传递 docxPath
+            FieldResolver = instr => ResolveField(instr, docxDocument, _docxPath)
         };
         paragraphConverter.HeadingRendered = (key, title, level, pageNumber) =>
         {
@@ -487,10 +489,10 @@ public class DocxToPdfConverter : IFileConverter
                             currentY = ct.YLine;
                         }
                         
-                        // 计算图片 X (居中或左对齐)
-                        var pageContentWidth = GetPageContentWidth(); // 图片通常是基于栏或页的，这里简化为基于页
+                        // 计算图片 X (基于栏)
+                        var columnBounds = GetColumnBounds(currentColumn);
                         // 若 floatObj.Left 未设置（非绝对定位），则默认居中
-                        var imgX = floatObj.PositionIsAbsolute ? floatObj.Left : (_options.MarginLeft + (pageContentWidth - floatObj.Width) / 2f);
+                        var imgX = floatObj.PositionIsAbsolute ? floatObj.Left : (columnBounds.Left + (columnBounds.Width - floatObj.Width) / 2f);
                         var imgY = floatObj.PositionIsAbsolute ? (_options.PageSize.Height - floatObj.Top - imgHeight) : (currentY - imgHeight - 5f);
                         
                         floatObj.Image.SetAbsolutePosition(imgX, imgY);

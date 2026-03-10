@@ -174,13 +174,20 @@ public class ColumnText
             default:
                 if (element.Type == -100) // FloatingObject
                 {
-                    // 浮动对象暂不支持竖排特殊处理，按绝对位置绘制
                     var floatObj = element as global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject;
                     if (floatObj != null && !simulate)
                     {
                         var imgObj = floatObj.Image;
                         _canvas.SaveState();
-                        _canvas.AddImage(imgObj, floatObj.Left, floatObj.PositionIsAbsolute ? floatObj.Top : startBlock - floatObj.Top - imgObj.ScaledHeight);
+                        if (TextDirection == TextDirection.Vertical && !floatObj.PositionIsAbsolute)
+                        {
+                            // 竖排：startBlock是X，startInline是Y
+                            _canvas.AddImage(imgObj, startBlock - floatObj.Width - floatObj.Left, startInline - floatObj.Top - imgObj.ScaledHeight);
+                        }
+                        else
+                        {
+                            _canvas.AddImage(imgObj, floatObj.Left, floatObj.PositionIsAbsolute ? floatObj.Top : startBlock - floatObj.Top - imgObj.ScaledHeight);
+                        }
                         _canvas.RestoreState();
                     }
                     return floatObj != null && floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Inline 
@@ -475,13 +482,30 @@ public class ColumnText
             
             foreach (var chunk in chunks)
             {
-                // RenderChunkVertical
-                // 需要返回新的 Y 位置
                 currentY = RenderChunkVertical(chunk, rightX, currentY, simulate);
             }
 
-            // 行号暂不支持竖排
-            
+            // 绘制行号 (竖排时绘制在上方)
+            if (!simulate && LineNumberSettings != null)
+            {
+                if (CurrentLineNumber % LineNumberSettings.CountBy == 0)
+                {
+                    float lnY = topY + LineNumberSettings.Distance + para.Font.Size;
+                    _canvas.SaveState();
+                    _canvas.BeginText();
+                    _canvas.SetFontAndSize("F1", para.Font.Size);
+                    
+                    var lnText = CurrentLineNumber.ToString();
+                    float lnWidth = lnText.Length * para.Font.Size * 0.5f; 
+                    
+                    _canvas.SetTextMatrix(1, 0, 0, 1, rightX - lineWidth / 2f - lnWidth / 2f, lnY);
+                    _canvas.ShowText(lnText);
+                    _canvas.EndText();
+                    _canvas.RestoreState();
+                }
+                CurrentLineNumber++;
+            }
+
             // 推进到下一行（向左）
             rightX -= lineWidth;
         }

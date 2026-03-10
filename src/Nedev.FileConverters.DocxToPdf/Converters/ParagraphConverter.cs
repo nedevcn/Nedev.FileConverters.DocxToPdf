@@ -292,7 +292,6 @@ public class ParagraphConverter
                 case BookmarkEnd:
                     // 书签结束标记，不需要处理
                     break;
-                    
                 // 公式支持（Office Math ML）
                 case DocumentFormat.OpenXml.Math.Paragraph mathParagraph:
                     var mathChunks = MathHelper.ExtractMathChunks(mathParagraph);
