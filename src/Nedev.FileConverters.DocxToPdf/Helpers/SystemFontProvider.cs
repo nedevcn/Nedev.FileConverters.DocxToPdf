@@ -130,15 +130,29 @@ public static class SystemFontProvider
                 var ext = Path.GetExtension(file).ToLowerInvariant();
                 if (ext != ".ttf" && ext != ".ttc" && ext != ".otf") continue;
 
-                // 记录文件名映射 (如 simsun.ttc -> simsun)
                 var fileName = Path.GetFileNameWithoutExtension(file);
                 _fontFileCache.TryAdd(fileName, file);
                 
-                // 尝试解析字体名称（这里为了性能暂时只用文件名做简单映射）
-                // 理想情况是解析 TTF 的 Name 表，但这比较耗时
-                // 我们先建立基础映射：
-                // simsun -> SimSun
-                // msyh -> Microsoft YaHei (需要硬编码一些常见字体文件名)
+                // SKTypeface handles both individual TTF/OTF (index 0) and TTC collections
+                for (int i = 0; i < 20; i++) // Prevent infinite loops, collections rarely exceed 15 fonts
+                {
+                    try
+                    {
+                        using var stream = new SKFileStream(file);
+                        using var tf = SKTypeface.FromStream(stream, i);
+                        if (tf == null) break; // Finished extracting all typefaces
+                        
+                        var familyName = tf.FamilyName;
+                        if (!string.IsNullOrWhiteSpace(familyName))
+                        {
+                            _fontFamilyToPathMap.TryAdd(familyName, file);
+                        }
+                    }
+                    catch
+                    {
+                        break;
+                    }
+                }
                 
                 MapCommonFontFiles(fileName, file);
             }
@@ -148,19 +162,6 @@ public static class SystemFontProvider
 
     private static void MapCommonFontFiles(string fileName, string filePath)
     {
-        var name = fileName.ToLowerInvariant();
-        
-        if (name == "simsun" || name == "simsunb") _fontFamilyToPathMap["SimSun"] = filePath;
-        else if (name == "nsimsun") _fontFamilyToPathMap["NSimSun"] = filePath;
-        else if (name == "simhei") _fontFamilyToPathMap["SimHei"] = filePath;
-        else if (name == "simkai") _fontFamilyToPathMap["KaiTi"] = filePath;
-        else if (name == "simfang") _fontFamilyToPathMap["FangSong"] = filePath;
-        else if (name == "msyh" || name == "msyhbd") _fontFamilyToPathMap["Microsoft YaHei"] = filePath;
-        else if (name == "arial" || name == "arialbd") _fontFamilyToPathMap["Arial"] = filePath;
-        else if (name == "times" || name == "timesbd") _fontFamilyToPathMap["Times New Roman"] = filePath;
-        else if (name == "calibri" || name == "calibrib") _fontFamilyToPathMap["Calibri"] = filePath;
-        else if (name == "consola" || name == "consolab") _fontFamilyToPathMap["Consolas"] = filePath;
-        
         // 通用兜底：文件名作为家族名
         _fontFamilyToPathMap.TryAdd(fileName, filePath);
     }

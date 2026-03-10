@@ -505,14 +505,7 @@ public class DocxToPdfConverter : IFileConverter
                              floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Tight || 
                              floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Through)
                     {
-                        // 四周型/紧密型/穿越型：文字环绕图片
-                        // 策略：
-                        // 1. 计算图片在页面中的位置
-                        // 2. 检测是否与当前文字流重叠
-                        // 3. 如果重叠，先推进文字流到图片下方
-                        // 4. 绘制图片
-                        // 5. 继续排版文字
-                        
+                        // 四周型/紧密型/穿越型：文字环绕图片 (真环绕)
                         var currentY = ct.YLine;
                         var imgWidth = floatObj.Width;
                         var imgHeight = floatObj.Height;
@@ -521,68 +514,13 @@ public class DocxToPdfConverter : IFileConverter
                             ? (_options.PageSize.Height - floatObj.Top - imgHeight) 
                             : (currentY - imgHeight - 5f);
                         
-                        // 计算图片占用的水平空间（相对于当前栏）
-                        var columnBounds = GetColumnBounds(currentColumn);
-                        var imgLeftInColumn = imgX - columnBounds.Left;
-                        var imgRightInColumn = imgLeftInColumn + imgWidth;
-                        var availableWidth = columnBounds.Width;
-                        var leftSpace = imgLeftInColumn;
-                        var rightSpace = availableWidth - imgRightInColumn;
-                        
-                        // 重叠检测：检查图片是否与当前文字流重叠
-                        var hasOverlap = imgY < currentY && imgY + imgHeight > _options.MarginBottom;
-                        
-                        // 判断图片是否在栏内（不完全在左侧或右侧）
-                        var imageInMiddle = leftSpace > 10f && rightSpace > 10f; // 左右都有空间
-                        
-                        if (hasOverlap)
-                        {
-                            if (imageInMiddle)
-                            {
-                                // 图片在中间，左右都有文字空间
-                                // 策略：在图片前插入空白，将文字推到图片下方
-                                // 这样可以避免文字重叠，但会留下空白区域
-                                
-                                // 计算需要推进的距离
-                                var pushDownDistance = imgY + imgHeight - currentY + 5f;
-                                if (pushDownDistance > 0)
-                                {
-                                    // 方法 1：使用空白段落推进文字流
-                                    var blankPara = new iTextParagraph(" ");
-                                    blankPara.SpacingAfter = pushDownDistance;
-                                    ct.AddElement(blankPara);
-                                }
-                            }
-                            else if (leftSpace < 10f || rightSpace < 10f)
-                            {
-                                // 图片占据大部分栏宽（左侧或右侧）
-                                // 策略：推进文字流到图片下方，让文字在图片下方继续
-
-                                var pushDownDistance = imgY + imgHeight - currentY + 5f;
-                                if (pushDownDistance > 0)
-                                {
-                                    // 使用空白段落推进文字流
-                                    var blankPara = new iTextParagraph(" ");
-                                    blankPara.SpacingAfter = pushDownDistance;
-                                    ct.AddElement(blankPara);
-                                }
-                            }
-                            // else: 图片在边缘，文字可以从另一侧环绕
-                            // 暂时不特殊处理，让 iText 自然排版
-                        }
+                        // Register the exclusion zone in ColumnText using SKRect(left, top, right, bottom)
+                        // In PDF space, Y=0 is bottom. So top is imgY + imgHeight, bottom is imgY
+                        ct.Exclusions.Add(new SkiaSharp.SKRect(imgX, imgY + imgHeight, imgX + imgWidth, imgY));
                         
                         // 设置图片绝对位置并绘制
                         floatObj.Image.SetAbsolutePosition(imgX, imgY);
                         writer.DirectContent.AddImage(floatObj.Image);
-                        
-                        // 更新文字流的 Y 位置（如果图片在当前文字流下方）
-                        var imageBottom = imgY - imgHeight;
-                        if (imageBottom < ct.YLine && imageBottom > _options.MarginBottom)
-                        {
-                            // 图片底部在当前位置下方，但不需要推进（已经在下方）
-                            // 可以选择性地更新 YLine，让后续文字从图片底部开始
-                            // ct.YLine = imageBottom; // 这可能导致文字跳到图片下方，谨慎使用
-                        }
                     }
                     else
                     {

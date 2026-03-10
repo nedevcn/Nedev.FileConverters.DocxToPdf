@@ -23,6 +23,9 @@ public class ColumnText
     public const int NO_MORE_COLUMN = 1;
     public const int NO_MORE_TEXT = 2;
 
+    // 环绕排除区
+    public List<SkiaSharp.SKRect> Exclusions { get; } = new();
+
     // 行号相关
     public LineNumberSettings? LineNumberSettings { get; set; }
     public int CurrentLineNumber { get; set; } = 1;
@@ -165,7 +168,7 @@ public class ColumnText
                 {
                     _canvas.SaveState();
                     if (TextDirection == TextDirection.Vertical)
-                        _canvas.AddImage(img, startBlock - img.ScaledWidth, startInline - img.ScaledHeight); // 简单放置，暂不支持旋转
+                        _canvas.AddImage(img, startBlock - img.ScaledWidth, startInline - img.ScaledHeight);
                     else
                         _canvas.AddImage(img, startInline, startBlock - img.ScaledHeight);
                     _canvas.RestoreState();
@@ -220,128 +223,119 @@ public class ColumnText
         }
 
         // calculate the usable width inside paragraph indentations
-        float availableWidth = width - para.IndentationLeft - para.IndentationRight;
-        if (availableWidth < 0) availableWidth = 0;
+        float defaultAvailableWidth = width - para.IndentationLeft - para.IndentationRight;
+        if (defaultAvailableWidth < 0) defaultAvailableWidth = 0;
 
-        // break chunks into lines using word-level wrapping
-        var lines = new List<(List<Chunk> chunks, float lineWidth)>();
+        // break chunks into lines using Y-aware exclusion wrapping
+        var lines = new List<(List<Chunk> chunks, float lineWidth, float lineStartX, float yLine, float lineAvailWidth)>();
+        var chunksList = new List<Chunk>(para.Chunks);
+        int chunkIdx = 0;
+
+        float currentY = y - para.SpacingBefore;
+        
         var currentLine = new List<Chunk>();
         float currentLineWidth = 0;
         bool firstTokenOnLine = true;
+        
+        float _currentLineStartX = x + para.IndentationLeft + para.FirstLineIndent;
+        float _currentLineAvailWidth = defaultAvailableWidth;
+        bool _needEval = true;
 
-        // Helper: split a chunk into word-level sub-chunks preserving whitespace
-        static List<Chunk> SplitChunkByWords(Chunk chunk)
+        while (chunkIdx < chunksList.Count)
         {
-            var result = new List<Chunk>();
-            var text = chunk.Content;
-            if (string.IsNullOrEmpty(text)) { result.Add(chunk); return result; }
-
-            int start = 0;
-            while (start < text.Length)
+            if (_needEval)
             {
-                // find next whitespace boundary
-                int spaceIdx = -1;
-                for (int j = start; j < text.Length; j++)
+                _currentLineStartX = x + para.IndentationLeft + (lines.Count == 0 ? para.FirstLineIndent : 0);
+                _currentLineAvailWidth = defaultAvailableWidth;
+                
+                // ex.Bottom is smaller Y, ex.Top is larger Y. PDF Y goes up.
+                foreach (var ex in Exclusions)
                 {
-                    if (char.IsWhiteSpace(text[j]))
+                    if (currentY - lineHeight < ex.Top && currentY > ex.Bottom)
                     {
-                        // include the space with the word before it
-                        spaceIdx = j;
-                        break;
+                        if (ex.Left <= _currentLineStartX + _currentLineAvailWidth / 2) // image on left half
+                        {
+                            float shift = Math.Max(0, (ex.Right + 8f) - _currentLineStartX); // 8f padding
+                            _currentLineStartX += shift;
+                            _currentLineAvailWidth -= shift;
+                        }
+                        else // image on right half
+                        {
+                            float cut = Math.Max(0, (_currentLineStartX + _currentLineAvailWidth) - (ex.Left - 8f));
+                            _currentLineAvailWidth -= cut;
+                        }
                     }
                 }
-
-                string word;
-                if (spaceIdx < 0)
+                
+                if (_currentLineAvailWidth <= 20 && currentY > _lly)
                 {
-                    word = text.Substring(start);
-                    start = text.Length;
+                    currentY -= lineHeight; // move down and try again
+                    continue;
                 }
-                else
-                {
-                    word = text.Substring(start, spaceIdx - start + 1);
-                    start = spaceIdx + 1;
-                }
-
-                if (word.Length > 0)
-                {
-                    var sub = new Chunk(word, chunk.Font)
-                    {
-                        BackgroundColor = chunk.BackgroundColor,
-                        TextRise = chunk.TextRise,
-                        Anchor = chunk.Anchor,
-                        HasUnderline = chunk.HasUnderline,
-                        UnderlineThickness = chunk.UnderlineThickness,
-                        UnderlineYPosition = chunk.UnderlineYPosition
-                    };
-                    result.Add(sub);
-                }
+                _needEval = false;
             }
 
-            if (result.Count == 0) result.Add(chunk);
-            return result;
-        }
-
-        foreach (var chunk in para.Chunks)
-        {
+            var chunk = chunksList[chunkIdx];
             var cw = chunk.GetWidth();
 
-            // If this whole chunk fits, add it directly (fast path)
-            if (firstTokenOnLine || currentLineWidth + cw <= availableWidth)
+            if (firstTokenOnLine || currentLineWidth + cw <= _currentLineAvailWidth)
             {
                 currentLine.Add(chunk);
                 currentLineWidth += cw;
                 firstTokenOnLine = false;
+                chunkIdx++;
                 continue;
             }
 
             // Chunk overflows — split by words
+            chunksList.RemoveAt(chunkIdx);
             var subChunks = SplitChunkByWords(chunk);
-            foreach (var sub in subChunks)
+            chunksList.InsertRange(chunkIdx, subChunks);
+            
+            var sw = chunksList[chunkIdx].GetWidth();
+            
+            // If it still overflows after splitting, break the line
+            if (firstTokenOnLine || currentLineWidth + sw <= _currentLineAvailWidth)
             {
-                var sw = sub.GetWidth();
-                if (!firstTokenOnLine && currentLineWidth + sw > availableWidth && currentLine.Count > 0)
-                {
-                    lines.Add((currentLine, currentLineWidth));
-                    currentLine = new List<Chunk>();
-                    currentLineWidth = 0;
-                    firstTokenOnLine = true;
-                }
-
-                currentLine.Add(sub);
+                currentLine.Add(chunksList[chunkIdx]);
                 currentLineWidth += sw;
                 firstTokenOnLine = false;
+                chunkIdx++;
+            }
+            else
+            {
+                lines.Add((currentLine, currentLineWidth, _currentLineStartX, currentY, _currentLineAvailWidth));
+                currentLine = new List<Chunk>();
+                currentLineWidth = 0;
+                firstTokenOnLine = true;
+                currentY -= lineHeight;
+                _needEval = true;
             }
         }
+        
         if (currentLine.Count > 0)
         {
-            lines.Add((currentLine, currentLineWidth));
+            lines.Add((currentLine, currentLineWidth, _currentLineStartX, currentY, _currentLineAvailWidth));
         }
 
         // render each line applying alignment and indentation
-        bool firstLine = true;
-        foreach (var (chunks, lineWidth) in lines)
+        foreach (var (chunks, lineWidth, lineStartX, yLine, lineAvailWidth) in lines)
         {
-            float startX = x + para.IndentationLeft;
-            if (firstLine)
-            {
-                startX += para.FirstLineIndent;
-                firstLine = false;
-            }
+            float startX = lineStartX;
 
             if (para.Alignment == Element.ALIGN_CENTER)
             {
-                startX += Math.Max(0, (availableWidth - lineWidth) / 2f);
+                startX += Math.Max(0, (lineAvailWidth - lineWidth) / 2f);
             }
             else if (para.Alignment == Element.ALIGN_RIGHT)
             {
-                startX += Math.Max(0, availableWidth - lineWidth);
+                startX += Math.Max(0, lineAvailWidth - lineWidth);
             }
 
             var currentX = startX;
             foreach (var chunk in chunks)
             {
-                currentX = RenderChunk(chunk, currentX, y, simulate);
+                currentX = RenderChunk(chunk, currentX, yLine, simulate);
             }
 
             // 绘制行号
@@ -364,16 +358,19 @@ public class ColumnText
                     // 简单估算宽度
                     float lnWidth = lnText.Length * para.Font.Size * 0.5f; 
                     
-                    _canvas.SetTextMatrix(1, 0, 0, 1, lnX - lnWidth, y - para.Font.Size * 0.8f);
+                    _canvas.SetTextMatrix(1, 0, 0, 1, lnX - lnWidth, yLine - para.Font.Size * 0.8f);
                     _canvas.ShowText(lnText);
                     _canvas.EndText();
                     _canvas.RestoreState();
                 }
                 CurrentLineNumber++;
             }
-
-            y -= lineHeight;
         }
+        
+        if (lines.Count > 0)
+            y = lines[^1].yLine - lineHeight;
+        else
+            y = currentY - lineHeight;
 
         foreach (var extra in para.ExtraElements)
         {
@@ -381,6 +378,39 @@ public class ColumnText
         }
 
         return y - para.SpacingAfter;
+    }
+
+    private static List<Chunk> SplitChunkByWords(Chunk chunk)
+    {
+        var result = new List<Chunk>();
+        if (string.IsNullOrEmpty(chunk.Content))
+        {
+            result.Add(chunk);
+            return result;
+        }
+
+        var words = chunk.Content.Split(new[] { ' ' }, StringSplitOptions.None);
+        for (int i = 0; i < words.Length; i++)
+        {
+            string w = words[i];
+            if (i < words.Length - 1)
+                w += " ";
+                
+            if (!string.IsNullOrEmpty(w))
+            {
+                var newChunk = new Chunk(w, chunk.Font)
+                {
+                    BackgroundColor = chunk.BackgroundColor,
+                    TextRise = chunk.TextRise,
+                    Anchor = chunk.Anchor,
+                    HasUnderline = chunk.HasUnderline,
+                    UnderlineThickness = chunk.UnderlineThickness,
+                    UnderlineYPosition = chunk.UnderlineYPosition
+                };
+                result.Add(newChunk);
+            }
+        }
+        return result;
     }
 
     private float RenderParagraphVertical(Paragraph para, float topY, float rightX, float height, bool simulate = false)

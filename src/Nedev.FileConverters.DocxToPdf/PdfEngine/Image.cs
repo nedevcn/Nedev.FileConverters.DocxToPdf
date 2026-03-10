@@ -23,6 +23,7 @@ public class Image : IElement
     public bool IsNestable() => false;
 
     public int Alignment { get; set; } = ALIGN_CENTER;
+    public float RotationAngle { get; set; } = 0f;
     public float OriginalWidth { get; private set; }
     public float OriginalHeight { get; private set; }
 

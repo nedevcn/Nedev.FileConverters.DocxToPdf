@@ -156,6 +156,21 @@ public class PdfContentByte
 
         // PDF图像XObject的默认空间是1x1，cm矩阵缩放到目标像素尺寸
         _content.Append("q\n");
+        
+        if (image.RotationAngle != 0)
+        {
+            var cx = x + image.ScaledWidth / 2f;
+            var cy = y + image.ScaledHeight / 2f;
+            // Word rot is clockwise, PDF Y coordinates go up, so clockwise means negative mathematical angle
+            var rad = -image.RotationAngle * Math.PI / 180.0;
+            var cos = (float)Math.Cos(rad);
+            var sin = (float)Math.Sin(rad);
+            
+            _content.Append($"1 0 0 1 {cx:F2} {cy:F2} cm\n");
+            _content.Append($"{cos:F4} {sin:F4} {-sin:F4} {cos:F4} 0 0 cm\n");
+            _content.Append($"1 0 0 1 {-cx:F2} {-cy:F2} cm\n");
+        }
+        
         _content.Append($"{image.ScaledWidth:F2} 0 0 {image.ScaledHeight:F2} {x:F2} {y:F2} cm\n");
         _content.Append($"/{xobjectName} Do\n");
         _content.Append("Q\n");

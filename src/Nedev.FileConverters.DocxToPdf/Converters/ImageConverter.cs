@@ -37,6 +37,7 @@ public class FloatingObject : IElement
     public float Left { get; set; }
     public float Top { get; set; } // ??? Top ???????????,?????????????
     public bool PositionIsAbsolute { get; set; } // ??????????????
+    public float RotationAngle { get; set; } // in degrees
     public float Width => Image.ScaledWidth;
     public float Height => Image.ScaledHeight;
     
@@ -248,7 +249,16 @@ public class ImageConverter
         
         if (embedId != null)
         {
-            return CreateImage(embedId, extent, pageWidth, blipFill, isAnchor: false);
+            var image = CreateImage(embedId, extent, pageWidth, blipFill, isAnchor: false);
+            if (image != null)
+            {
+                var xfrm = inline.Descendants<DocumentFormat.OpenXml.Drawing.Transform2D>().FirstOrDefault();
+                if (xfrm?.Rotation != null && xfrm.Rotation.HasValue)
+                {
+                    image.RotationAngle = xfrm.Rotation.Value / 60000f;
+                }
+            }
+            return image;
         }
         
         return null;
@@ -293,6 +303,13 @@ public class ImageConverter
         if (image == null) return null;
 
         var floatObj = new FloatingObject(image);
+        
+        var xfrm = anchor.Descendants<DocumentFormat.OpenXml.Drawing.Transform2D>().FirstOrDefault();
+        if (xfrm?.Rotation != null && xfrm.Rotation.HasValue)
+        {
+            floatObj.RotationAngle = xfrm.Rotation.Value / 60000f;
+            image.RotationAngle = floatObj.RotationAngle;
+        }
         
         // ??????
         var wrapNone = anchor.GetFirstChild<DW.WrapNone>();
