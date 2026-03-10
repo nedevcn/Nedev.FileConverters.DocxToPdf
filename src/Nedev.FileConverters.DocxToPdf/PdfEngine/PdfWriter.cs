@@ -38,6 +38,20 @@ public class PdfContentByte
     public void Fill() => _content.Append("f\n");
     public void FillAndStroke() => _content.Append("B\n");
 
+    /// <summary>
+    /// Set the line dash pattern. Pass empty array to reset to solid.
+    /// </summary>
+    public void SetLineDash(float[] pattern, float phase = 0)
+    {
+        _content.Append('[');
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            if (i > 0) _content.Append(' ');
+            _content.Append($"{pattern[i]:F2}");
+        }
+        _content.Append($"] {phase:F2} d\n");
+    }
+
     public void Rectangle(float x, float y, float width, float height) =>
         _content.Append($"{x:F2} {y:F2} {width:F2} {height:F2} re\n");
 

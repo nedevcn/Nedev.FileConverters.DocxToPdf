@@ -303,17 +303,6 @@ public class ParagraphConverter
                         pdfParagraph.Add(chunk);
                         hasContent = true;
                     }
-
-                    // VML Support (WordArt, Shapes)
-                    if (_mainPart != null)
-                    {
-                        var vmlChunks = VmlHelper.ExtractVmlElements(mathParagraph, _mainPart);
-                        foreach (var chunk in vmlChunks)
-                        {
-                            pdfParagraph.Add(chunk);
-                            hasContent = true;
-                        }
-                    }
                     break;
                     
                 case Run run:
@@ -526,6 +515,17 @@ public class ParagraphConverter
         foreach (var element in docxParagraph.ChildElements)
         {
             AppendInline(element);
+        }
+
+        // VML Support (WordArt, Shapes) — extract from the entire paragraph
+        if (_mainPart != null)
+        {
+            var vmlElements = VmlHelper.ExtractVmlElements(docxParagraph, _mainPart);
+            foreach (var vml in vmlElements)
+            {
+                pdfParagraph.Add(vml);
+                hasContent = true;
+            }
         }
 
         // 检查该段落中是否曾产生过 PAGE_BREAK，如果没有其它内容，则不必加空格充高度

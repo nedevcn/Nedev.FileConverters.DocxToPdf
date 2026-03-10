@@ -320,6 +320,16 @@ public class DocxToPdfConverter : IFileConverter
         int currentSectionIndex = 0;
         bool sectionBreakEncountered = false;
 
+        // Deferred InFrontOfText images — drawn after ColumnText.Go() to ensure correct z-order
+        var pendingInFrontImages = new List<global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject>();
+
+        void FlushInFrontImages()
+        {
+            foreach (var pending in pendingInFrontImages)
+                writer.DirectContent.AddImage(pending.Image);
+            pendingInFrontImages.Clear();
+        }
+
         void SetColumnBounds()
         {
             var info = _currentColumnInfo;
@@ -449,27 +459,8 @@ public class DocxToPdfConverter : IFileConverter
                     }
                     else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.InFrontOfText)
                     {
-                        // 简单起见，立即绘制到前景
-                        // 理想情况下应收集起来，确保在文本后绘制
-                        // 但 iTextSharp 的 ContentByte 叠加顺序是固定的（ContentOver 覆盖 ContentUnder）
-                        // DirectContent 与 ColumnText 的关系：ColumnText 绘制到 DirectContent 上。
-                        // 如果我们在 AddElement 之前绘制 Image，Image 会在文字下方？不一定。
-                        // ColumnText.Go() 才是真正绘制。
-                        // 这里我们直接画到 DirectContent，可能会被后续 ColumnText 覆盖？
-                        // 不，DirectContent 是同一个层。
-                        // 为了确保在文字上方，我们可以画到 DirectContent，但必须在 ColumnText.Go() 之后？
-                        // 或者使用 PdfContentByte 的层级管理。
-                        // 简单方案：InFront 画到 DirectContent，Behind 画到 DirectContentUnder。
-                        // 但 ColumnText 也是画到 DirectContent。
-                        // 如果我们在 item 循环中直接 writer.DirectContent.AddImage，
-                        // 那么它会在当前已有的 ColumnText 内容之上（如果 Go() 还没调用），还是之下？
-                        // 实际上 ColumnText 还没 Go()。
-                        // 所以这里应该把 InFront 对象暂存，等本页 Go() 完后再画？
-                        // 或者：ColumnText 是流式的，它占用了区域。
-                        // InFront 对象是绝对定位的，不占流式空间。
-                        // 我们直接画即可。为了保证在文字上方，最好是在本页所有文字画完后画。
-                        // 但这比较复杂。先直接画试试。
-                        writer.DirectContent.AddImage(floatObj.Image);
+                        // Defer drawing until after ColumnText.Go() to ensure images appear above text
+                        pendingInFrontImages.Add(floatObj);
                     }
                     else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.TopAndBottom)
                     {
@@ -606,6 +597,7 @@ public class DocxToPdfConverter : IFileConverter
                 while (true)
                 {
                     var status = ct.Go();
+                    FlushInFrontImages(); // draw deferred InFrontOfText images above rendered text
                     if (!ColumnText.HasMoreText(status)) break;
 
                     // 当前栏已满
@@ -623,6 +615,7 @@ public class DocxToPdfConverter : IFileConverter
 
         // 确保所有内容都被渲染
         ct.Go();
+        FlushInFrontImages(); // draw any remaining deferred images
 
         // 脚注与尾注内容（文末输出）
         if (_options.RenderFootnoteEndContent)
@@ -1844,12 +1837,69 @@ internal class PageBorderEvent : PdfPageEventHelper
         {
             if (side == null || side.Val == "none") return;
 
-            // Simple solid line for now
-            cb.SetLineWidth(side.Size);
-            cb.SetColorStroke(side.Color);
-            cb.MoveTo(x1, y1);
-            cb.LineTo(x2, y2);
-            cb.Stroke();
+            var size = side.Size;
+
+            switch (side.Val)
+            {
+                case "double":
+                    // Draw two parallel lines with a gap
+                    var gap = Math.Max(size * 1.5f, 1f);
+                    // Determine offset direction (perpendicular to the line)
+                    var dx = x2 - x1;
+                    var dy = y2 - y1;
+                    var len = (float)Math.Sqrt(dx * dx + dy * dy);
+                    float nx = 0, ny = 0;
+                    if (len > 0) { nx = -dy / len * gap / 2f; ny = dx / len * gap / 2f; }
+
+                    cb.SetLineWidth(size * 0.5f);
+                    cb.SetColorStroke(side.Color);
+                    cb.MoveTo(x1 + nx, y1 + ny);
+                    cb.LineTo(x2 + nx, y2 + ny);
+                    cb.Stroke();
+                    cb.MoveTo(x1 - nx, y1 - ny);
+                    cb.LineTo(x2 - nx, y2 - ny);
+                    cb.Stroke();
+                    break;
+
+                case "dashed":
+                case "dashSmallGap":
+                    cb.SetLineWidth(size);
+                    cb.SetColorStroke(side.Color);
+                    cb.SetLineDash(new[] { 4f * size, 2f * size });
+                    cb.MoveTo(x1, y1);
+                    cb.LineTo(x2, y2);
+                    cb.Stroke();
+                    cb.SetLineDash(Array.Empty<float>()); // reset
+                    break;
+
+                case "dotted":
+                    cb.SetLineWidth(size);
+                    cb.SetColorStroke(side.Color);
+                    cb.SetLineDash(new[] { size, size });
+                    cb.MoveTo(x1, y1);
+                    cb.LineTo(x2, y2);
+                    cb.Stroke();
+                    cb.SetLineDash(Array.Empty<float>());
+                    break;
+
+                case "dotDash":
+                    cb.SetLineWidth(size);
+                    cb.SetColorStroke(side.Color);
+                    cb.SetLineDash(new[] { 4f * size, 2f * size, size, 2f * size });
+                    cb.MoveTo(x1, y1);
+                    cb.LineTo(x2, y2);
+                    cb.Stroke();
+                    cb.SetLineDash(Array.Empty<float>());
+                    break;
+
+                default: // "single" and others — solid line
+                    cb.SetLineWidth(size);
+                    cb.SetColorStroke(side.Color);
+                    cb.MoveTo(x1, y1);
+                    cb.LineTo(x2, y2);
+                    cb.Stroke();
+                    break;
+            }
         }
 
         float top = rect.Top;

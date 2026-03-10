@@ -133,6 +133,7 @@ public class PdfPTable : IElement
     public float SpacingAfter { get; set; } = 6f;
     public int HeaderRows { get; set; }
     public bool KeepTogether { get; set; }
+    public int HorizontalAlignment { get; set; } = Element.ALIGN_LEFT;
 
     public float BorderWidth { set => DefaultCell.Border = value > 0 ? 1 : 0; }
     public BaseColor BorderColor { set => DefaultCell.BorderColorTop = value; }

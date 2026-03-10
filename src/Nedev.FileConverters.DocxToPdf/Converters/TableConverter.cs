@@ -107,6 +107,13 @@ public class TableConverter
             pdfTable.WidthPercentage = 100;
         }
 
+        // 表格水平对齐 (jc)
+        var jc = tableProps?.TableJustification?.Val?.Value;
+        if (jc == TableRowAlignmentValues.Center)
+            pdfTable.HorizontalAlignment = Element.ALIGN_CENTER;
+        else if (jc == TableRowAlignmentValues.Right)
+            pdfTable.HorizontalAlignment = Element.ALIGN_RIGHT;
+
         // ????
         if (colWidths != null && colWidths.Length == columnCount)
         {

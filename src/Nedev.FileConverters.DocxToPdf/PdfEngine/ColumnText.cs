@@ -216,26 +216,95 @@ public class ColumnText
         float availableWidth = width - para.IndentationLeft - para.IndentationRight;
         if (availableWidth < 0) availableWidth = 0;
 
-        // break chunks into lines first so we can compute each line's width
+        // break chunks into lines using word-level wrapping
         var lines = new List<(List<Chunk> chunks, float lineWidth)>();
         var currentLine = new List<Chunk>();
         float currentLineWidth = 0;
-        bool firstChunkOnLine = true;
+        bool firstTokenOnLine = true;
+
+        // Helper: split a chunk into word-level sub-chunks preserving whitespace
+        static List<Chunk> SplitChunkByWords(Chunk chunk)
+        {
+            var result = new List<Chunk>();
+            var text = chunk.Content;
+            if (string.IsNullOrEmpty(text)) { result.Add(chunk); return result; }
+
+            int start = 0;
+            while (start < text.Length)
+            {
+                // find next whitespace boundary
+                int spaceIdx = -1;
+                for (int j = start; j < text.Length; j++)
+                {
+                    if (char.IsWhiteSpace(text[j]))
+                    {
+                        // include the space with the word before it
+                        spaceIdx = j;
+                        break;
+                    }
+                }
+
+                string word;
+                if (spaceIdx < 0)
+                {
+                    word = text.Substring(start);
+                    start = text.Length;
+                }
+                else
+                {
+                    word = text.Substring(start, spaceIdx - start + 1);
+                    start = spaceIdx + 1;
+                }
+
+                if (word.Length > 0)
+                {
+                    var sub = new Chunk(word, chunk.Font)
+                    {
+                        BackgroundColor = chunk.BackgroundColor,
+                        TextRise = chunk.TextRise,
+                        Anchor = chunk.Anchor,
+                        HasUnderline = chunk.HasUnderline,
+                        UnderlineThickness = chunk.UnderlineThickness,
+                        UnderlineYPosition = chunk.UnderlineYPosition
+                    };
+                    result.Add(sub);
+                }
+            }
+
+            if (result.Count == 0) result.Add(chunk);
+            return result;
+        }
 
         foreach (var chunk in para.Chunks)
         {
             var cw = chunk.GetWidth();
-            if (!firstChunkOnLine && currentLineWidth + cw > availableWidth && currentLine.Count > 0)
+
+            // If this whole chunk fits, add it directly (fast path)
+            if (firstTokenOnLine || currentLineWidth + cw <= availableWidth)
             {
-                lines.Add((currentLine, currentLineWidth));
-                currentLine = new List<Chunk>();
-                currentLineWidth = 0;
-                firstChunkOnLine = true;
+                currentLine.Add(chunk);
+                currentLineWidth += cw;
+                firstTokenOnLine = false;
+                continue;
             }
 
-            currentLine.Add(chunk);
-            currentLineWidth += cw;
-            firstChunkOnLine = false;
+            // Chunk overflows — split by words
+            var subChunks = SplitChunkByWords(chunk);
+            foreach (var sub in subChunks)
+            {
+                var sw = sub.GetWidth();
+                if (!firstTokenOnLine && currentLineWidth + sw > availableWidth && currentLine.Count > 0)
+                {
+                    lines.Add((currentLine, currentLineWidth));
+                    currentLine = new List<Chunk>();
+                    currentLineWidth = 0;
+                    firstTokenOnLine = true;
+                }
+
+                currentLine.Add(sub);
+                currentLineWidth += sw;
+                firstTokenOnLine = false;
+            }
         }
         if (currentLine.Count > 0)
         {
@@ -588,6 +657,13 @@ public class ColumnText
         y -= table.SpacingBefore;
 
         var widths = table.GetWidths(width);
+
+        // Apply table horizontal alignment offset
+        var tableActualWidth = widths.Sum() * table.WidthPercentage / 100f;
+        if (table.HorizontalAlignment == Element.ALIGN_CENTER)
+            x += Math.Max(0, (width - tableActualWidth) / 2f);
+        else if (table.HorizontalAlignment == Element.ALIGN_RIGHT)
+            x += Math.Max(0, width - tableActualWidth);
 
         foreach (var row in table.RowsList)
         {
