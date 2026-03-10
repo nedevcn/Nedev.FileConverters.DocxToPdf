@@ -19,6 +19,11 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Nedev.FileConverters.DocxToPdf.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.*" />

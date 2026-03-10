@@ -127,6 +127,8 @@ public class PdfPTable : IElement
 
     public int NumberOfColumns { get; }
     public float WidthPercentage { get; set; } = 100f;
+    public float TotalWidth { get; set; }
+    public bool LockedWidth { get; set; }
     public float SpacingBefore { get; set; } = 6f;
     public float SpacingAfter { get; set; } = 6f;
     public int HeaderRows { get; set; }

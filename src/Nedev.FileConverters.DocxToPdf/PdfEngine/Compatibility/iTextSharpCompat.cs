@@ -25,8 +25,6 @@ using iTextPdfDestination = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfDestinat
 using iTextPdfPageEventHelper = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfPageEventHelper;
 using iTextPdfReader = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfReader;
 using iTextPdfStamper = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfStamper;
-using iTextFloatingObject = Nedev.FileConverters.DocxToPdf.PdfEngine.FloatingObject;
-using iTextWrappingStyle = Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle;
 
 namespace Nedev.FileConverters.DocxToPdf.PdfEngine.Compatibility;
 

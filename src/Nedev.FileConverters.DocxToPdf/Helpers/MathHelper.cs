@@ -44,18 +44,16 @@ public static class MathHelper
             }
             else if (localName == "r" || localName == "run")
             {
-                var runText = ExtractMathText(child);
-                if (!string.IsNullOrEmpty(runText))
-                    parts.Add(runText);
+                // Recursive call for internal elements (like <m:t>)
+                parts.Add(ExtractMathText(child));
             }
             else if (localName == "f" || localName == "frac" || localName == "fraction")
             {
-                var num = child.Descendants().FirstOrDefault(e => e.LocalName == "num" || e.LocalName == "numerator");
-                var den = child.Descendants().FirstOrDefault(e => e.LocalName == "den" || e.LocalName == "denominator");
+                var num = child.Elements().FirstOrDefault(e => e.LocalName == "num" || e.LocalName == "numerator");
+                var den = child.Elements().FirstOrDefault(e => e.LocalName == "den" || e.LocalName == "denominator");
                 var numText = num != null ? ExtractMathText(num) : "";
                 var denText = den != null ? ExtractMathText(den) : "";
-                if (!string.IsNullOrEmpty(numText) && !string.IsNullOrEmpty(denText))
-                    parts.Add($"({numText})/({denText})");
+                parts.Add($"({numText})/({denText})");
             }
             else if (localName == "sSup" || localName == "sup" || localName == "superscript")
             {
@@ -63,8 +61,7 @@ public static class MathHelper
                 var supElem = child.Elements().FirstOrDefault(e => e.LocalName == "sup" || e.LocalName == "superScript");
                 var baseText = baseElem != null ? ExtractMathText(baseElem) : "";
                 var supText = supElem != null ? ExtractMathText(supElem) : "";
-                if (!string.IsNullOrEmpty(baseText) && !string.IsNullOrEmpty(supText))
-                    parts.Add($"{baseText}^{supText}");
+                parts.Add($"{baseText}^{supText}");
             }
             else if (localName == "sSub" || localName == "sub" || localName == "subscript")
             {
@@ -72,33 +69,39 @@ public static class MathHelper
                 var subElem = child.Elements().FirstOrDefault(e => e.LocalName == "sub" || e.LocalName == "subScript");
                 var baseText = baseElem != null ? ExtractMathText(baseElem) : "";
                 var subText = subElem != null ? ExtractMathText(subElem) : "";
-                if (!string.IsNullOrEmpty(baseText) && !string.IsNullOrEmpty(subText))
-                    parts.Add($"{baseText}_{subText}");
+                parts.Add($"{baseText}_{subText}");
+            }
+            else if (localName == "sSubSup" || localName == "subsup")
+            {
+                var baseElem = child.Elements().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "base");
+                var subElem = child.Elements().FirstOrDefault(e => e.LocalName == "sub" || e.LocalName == "subScript");
+                var supElem = child.Elements().FirstOrDefault(e => e.LocalName == "sup" || e.LocalName == "superScript");
+                var baseText = baseElem != null ? ExtractMathText(baseElem) : "";
+                var subText = subElem != null ? ExtractMathText(subElem) : "";
+                var supText = supElem != null ? ExtractMathText(supElem) : "";
+                parts.Add($"{baseText}_{{{subText}}}^{{{supText}}}");
             }
             else if (localName == "rad" || localName == "radical")
             {
-                var radicand = child.Descendants().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "radicand");
-                var degree = child.Descendants().FirstOrDefault(e => e.LocalName == "deg" || e.LocalName == "degree");
+                var radicand = child.Elements().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "radicand");
+                var degree = child.Elements().FirstOrDefault(e => e.LocalName == "deg" || e.LocalName == "degree");
                 var radicandText = radicand != null ? ExtractMathText(radicand) : "";
                 var degreeText = degree != null ? ExtractMathText(degree) : "";
-                if (!string.IsNullOrEmpty(radicandText))
-                {
-                    if (!string.IsNullOrEmpty(degreeText))
-                        parts.Add($"{degreeText}√({radicandText})");
-                    else
-                        parts.Add($"√({radicandText})");
-                }
+                if (!string.IsNullOrEmpty(degreeText))
+                    parts.Add($"{degreeText}√({radicandText})");
+                else
+                    parts.Add($"√({radicandText})");
             }
-            else if (localName == "lim" || localName == "limit")
+            else if (localName == "lim" || localName == "limit" || localName == "limLow" || localName == "limUp")
             {
                 var baseElem = child.Elements().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "base");
-                var limitElem = child.Elements().FirstOrDefault(e => e.LocalName == "lim" || e.LocalName == "limit");
+                var limitElem = child.Elements().FirstOrDefault(e => e.LocalName == "lim" || e.LocalName == "limit" || e.LocalName == "sub" || e.LocalName == "sup");
                 var baseText = baseElem != null ? ExtractMathText(baseElem) : "";
                 var limitText = limitElem != null ? ExtractMathText(limitElem) : "";
-                if (!string.IsNullOrEmpty(baseText) && !string.IsNullOrEmpty(limitText))
-                    parts.Add($"lim_{limitText} {baseText}");
+                var op = localName.Contains("Low") ? "lim_" : localName.Contains("Up") ? "lim^" : "lim_";
+                parts.Add($"{op}{{{limitText}}} {baseText}");
             }
-            else if (localName == "sum" || localName == "product" || localName == "int" || localName == "integral")
+            else if (localName == "sum" || localName == "product" || localName == "int" || localName == "integral" || localName == "nary")
             {
                 var baseElem = child.Elements().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "base");
                 var subElem = child.Elements().FirstOrDefault(e => e.LocalName == "sub" || e.LocalName == "subScript");
@@ -111,36 +114,37 @@ public static class MathHelper
             }
             else if (localName == "func" || localName == "function")
             {
-                var fname = child.Descendants().FirstOrDefault(e => e.LocalName == "fName" || e.LocalName == "functionName");
-                var fe = child.Descendants().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "element");
+                var fname = child.Elements().FirstOrDefault(e => e.LocalName == "fName" || e.LocalName == "functionName");
+                var fe = child.Elements().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "element");
                 var fnameText = fname != null ? ExtractMathText(fname) : "";
                 var feText = fe != null ? ExtractMathText(fe) : "";
-                if (!string.IsNullOrEmpty(fnameText) && !string.IsNullOrEmpty(feText))
-                    parts.Add($"{fnameText}({feText})");
+                parts.Add($"{fnameText}({feText})");
             }
-            else if (localName == "bar" || localName == "overline")
+            else if (localName == "d" || localName == "delimiter")
             {
-                var barElem = child.Descendants().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "element");
-                var barText = barElem != null ? ExtractMathText(barElem) : "";
-                if (!string.IsNullOrEmpty(barText))
-                    parts.Add($"({barText})¯");
+                var open = child.Elements().FirstOrDefault(e => e.LocalName == "begChr")?.InnerText ?? "(";
+                var close = child.Elements().FirstOrDefault(e => e.LocalName == "endChr")?.InnerText ?? ")";
+                var content = child.Elements().FirstOrDefault(e => e.LocalName == "e");
+                parts.Add($"{open}{(content != null ? ExtractMathText(content) : "")}{close}");
             }
-            else if (localName == "vec" || localName == "vector")
+            else if (localName == "m" || localName == "matrix")
             {
-                var vecElem = child.Descendants().FirstOrDefault(e => e.LocalName == "e" || e.LocalName == "element");
-                var vecText = vecElem != null ? ExtractMathText(vecElem) : "";
-                if (!string.IsNullOrEmpty(vecText))
-                    parts.Add($"({vecText})⃗");
+                parts.Add("[Matrix]");
+            }
+            else if (localName == "groupChr")
+            {
+                var eElem = child.Elements().FirstOrDefault(e => e.LocalName == "e");
+                var chrElem = child.Elements().FirstOrDefault(e => e.LocalName == "chr")?.InnerText ?? "¯";
+                parts.Add($"({(eElem != null ? ExtractMathText(eElem) : "")}){chrElem}");
             }
             else
             {
-                var childText = ExtractMathText(child);
-                if (!string.IsNullOrEmpty(childText))
-                    parts.Add(childText);
+                // Fallback: just proceed with children, but avoid innerText here to prevent duplication
+                parts.Add(ExtractMathText(child));
             }
         }
         
-        if (parts.Count == 0 && !string.IsNullOrEmpty(element.InnerText))
+        if (parts.Count == 0 && !element.HasChildren && !string.IsNullOrEmpty(element.InnerText))
             return element.InnerText;
             
         return string.Join("", parts);

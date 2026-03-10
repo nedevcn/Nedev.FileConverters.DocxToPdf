@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml;
+﻿using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
@@ -10,9 +10,9 @@ namespace Nedev.FileConverters.DocxToPdf.Helpers;
 
 public static class VmlHelper
 {
-    public static List<Chunk> ExtractVmlElements(OpenXmlElement parent, MainDocumentPart mainPart)
+    public static List<IElement> ExtractVmlElements(OpenXmlElement parent, MainDocumentPart mainPart)
     {
-        var chunks = new List<Chunk>();
+        var elements = new List<IElement>();
         
         var vmlShapes = parent.Descendants().Where(e => 
             e.LocalName == "shape" || 
@@ -40,16 +40,25 @@ public static class VmlHelper
                 
                 var chunk = new iTextChunk(wordArtText, font);
                 
-                if (fontInfo.HasFill)
+                if (fontInfo.HasFill && fontInfo.FillColor != null)
                 {
                     chunk.SetBackground(fontInfo.FillColor);
                 }
                 
-                chunks.Add(chunk);
+                elements.Add(chunk);
+            }
+            else
+            {
+                // Basic Shape Support
+                var shapeElement = CreateShapeElement(shape);
+                if (shapeElement != null)
+                {
+                    elements.Add(shapeElement);
+                }
             }
         }
 
-        return chunks;
+        return elements;
     }
 
     private static string ExtractWordArtText(OpenXmlElement shape)
@@ -185,5 +194,79 @@ public static class VmlHelper
         public BaseColor? TextColor { get; set; }
         public bool HasFill { get; set; }
         public BaseColor? FillColor { get; set; }
+    }
+
+    private static IElement? CreateShapeElement(OpenXmlElement shape)
+    {
+        var styleAttr = shape.GetAttribute("style", "");
+        var style = styleAttr.Value ?? "";
+        var info = ParseVmlStyle(style);
+
+        // Determine size from style (e.g., width:100pt;height:50pt)
+        float width = 50f, height = 50f;
+        var parts = style.Split(';');
+        foreach(var p in parts)
+        {
+            var kv = p.Split(':');
+            if (kv.Length == 2)
+            {
+                var k = kv[0].Trim().ToLowerInvariant();
+                var v = kv[1].Trim().ToLowerInvariant();
+                if (k == "width" && v.EndsWith("pt")) float.TryParse(v.Replace("pt", ""), out width);
+                else if (k == "height" && v.EndsWith("pt")) float.TryParse(v.Replace("pt", ""), out height);
+            }
+        }
+
+        if (shape.LocalName == "rect" || shape.LocalName == "shape" || shape.LocalName == "oval")
+        {
+            var fill = shape.Descendants().FirstOrDefault(e => e.LocalName == "fill");
+            if (fill != null)
+            {
+                var colorStr = fill.GetAttribute("color", "").Value;
+                if (!string.IsNullOrEmpty(colorStr))
+                {
+                    var c = ParseColor(colorStr);
+                    if (c != null)
+                    {
+                        info.HasFill = true;
+                        info.FillColor = c;
+                    }
+                }
+            }
+
+            var stroke = shape.Descendants().FirstOrDefault(e => e.LocalName == "stroke");
+            float borderWidth = 1f;
+            BaseColor borderColor = info.TextColor ?? BaseColor.Black;
+
+            if (stroke != null)
+            {
+                var weightStr = stroke.GetAttribute("weight", "").Value;
+                if (!string.IsNullOrEmpty(weightStr))
+                {
+                    if (weightStr.EndsWith("pt")) float.TryParse(weightStr.Replace("pt", ""), out borderWidth);
+                    else if (float.TryParse(weightStr, out var w)) borderWidth = w / 12700f; // EMU to pt
+                }
+
+                var colorStr = stroke.GetAttribute("color", "").Value;
+                if (!string.IsNullOrEmpty(colorStr))
+                {
+                    var c = ParseColor(colorStr);
+                    if (c != null) borderColor = c;
+                }
+            }
+
+            var table = new PdfPTable(1) { TotalWidth = width, LockedWidth = true };
+            var cell = new PdfPCell(new Phrase(" ")) 
+            { 
+                FixedHeight = height,
+                BorderWidth = borderWidth,
+                BorderColor = borderColor
+            };
+            if (info.HasFill && info.FillColor != null) cell.BackgroundColor = info.FillColor;
+            table.AddCell(cell);
+            return table;
+        }
+
+        return null;
     }
 }

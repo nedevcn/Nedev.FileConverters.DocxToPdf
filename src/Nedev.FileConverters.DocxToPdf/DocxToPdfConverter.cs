@@ -29,8 +29,6 @@ using iTextPdfDestination = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfDestinat
 using iTextPdfPageEventHelper = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfPageEventHelper;
 using iTextPdfReader = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfReader;
 using iTextPdfStamper = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfStamper;
-using iTextFloatingObject = Nedev.FileConverters.DocxToPdf.PdfEngine.FloatingObject;
-using iTextWrappingStyle = Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle;
 using DocxImageConverter = Nedev.FileConverters.DocxToPdf.Converters.ImageConverter;
 using WParagraph = DocumentFormat.OpenXml.Wordprocessing.Paragraph;
 using WTable = DocumentFormat.OpenXml.Wordprocessing.Table;
@@ -246,10 +244,16 @@ public class DocxToPdfConverter : IFileConverter
 
         // 书签支持
         var bookmarkTracker = new global::Nedev.FileConverters.DocxToPdf.PdfEngine.BookmarkTracker(writer);
-        if (hasHeaderFooter)
-            writer.PageEvent = new CombinedPageEvent(sectionTracker, bookmarkTracker);
+        
+        // 收集所有 PageEvent
+        var events = new List<PdfPageEventHelper> { bookmarkTracker };
+        if (hasHeaderFooter) events.Insert(0, sectionTracker);
+        if (_options.PageBorders != null) events.Add(new PageBorderEvent(_options.PageBorders, _options));
+        
+        if (events.Count > 1)
+            writer.PageEvent = new CombinedPageEvent(events.ToArray());
         else
-            writer.PageEvent = bookmarkTracker;
+            writer.PageEvent = events[0];
         
         pdfDocument.Open();
         pdfDocument.NewPage(); // MUST start a page so PdfWriter tracks it correctly
@@ -271,7 +275,7 @@ public class DocxToPdfConverter : IFileConverter
             }
         }
 
-        var paragraphConverter = new ParagraphConverter(fontHelper, styles, colorScheme, hyperlinkTargets, footnoteNumberById, endnoteNumberById)
+        var paragraphConverter = new ParagraphConverter(fontHelper, styles, colorScheme, hyperlinkTargets, footnoteNumberById, endnoteNumberById, docxDocument.MainDocumentPart)
         {
             FootnoteIdsEncountered = footnoteIdsEncountered,
             EndnoteIdsEncountered = endnoteIdsEncountered,
@@ -811,7 +815,7 @@ public class DocxToPdfConverter : IFileConverter
     /// <summary>
     /// 默认字段解析：支持 DATE/TIME/AUTHOR/TITLE/SUBJECT/REF/MERGEFIELD 等字段。
     /// </summary>
-    private string? ResolveField(string instruction, WordprocessingDocument docxDocument, string? docxPath = null)
+    internal string? ResolveField(string instruction, WordprocessingDocument docxDocument, string? docxPath = null)
     {
         if (string.IsNullOrWhiteSpace(instruction)) return null;
         var parts = instruction.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
@@ -868,8 +872,9 @@ public class DocxToPdfConverter : IFileConverter
                 
             case "FILENAME":
                 // 获取文件名（不含路径）
-                // 注意：PackageProperties 没有直接的 Source 属性，简化处理
-                return Path.GetFileNameWithoutExtension(docxPath ?? "document");
+                // 优先使用提供的 docxPath
+                var fileName = !string.IsNullOrEmpty(docxPath) ? Path.GetFileNameWithoutExtension(docxPath) : "document";
+                return fileName;
                 
             case "FILEPATH":
                 // 返回文档路径（如果有）
@@ -890,8 +895,18 @@ public class DocxToPdfConverter : IFileConverter
                 return ParseRefField(instruction, docxDocument);
                 
             case "MERGEFIELD":
-                // 邮件合并字段，需要数据源
-                return ParseMergeField(instruction, docxDocument);
+                // 邮件合并字段
+                var mfMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"MERGEFIELD\s+""?([^""\s]+)""?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (mfMatch.Success)
+                {
+                    var fieldName = mfMatch.Groups[1].Value;
+                    if (_options.MergeData != null && _options.MergeData.TryGetValue(fieldName, out var val))
+                    {
+                        return val;
+                    }
+                    return ParseMergeField(instruction, docxDocument);
+                }
+                return null;
                 
             case "HYPERLINK":
                 // 超链接字段
@@ -927,7 +942,7 @@ public class DocxToPdfConverter : IFileConverter
     /// </summary>
     private static string ParseFieldFormat(string instruction, string defaultFormat)
     {
-        var formatMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"\\@\s*""([^""]+)""");
+        var formatMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"\\@\s*""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         return formatMatch.Success ? formatMatch.Groups[1].Value : defaultFormat;
     }
     
@@ -1562,6 +1577,39 @@ public class DocxToPdfConverter : IFileConverter
         {
             _options.LineNumberSettings = null;
         }
+
+        // 页面边框
+        var pgBorders = sectionProps.GetFirstChild<PageBorders>();
+        if (pgBorders != null)
+        {
+            var options = new PageBorderOptions
+            {
+                OffsetFrom = pgBorders.OffsetFrom?.Value.ToString().ToLower() ?? "page"
+            };
+
+            PageBorderSide? ParseSide(BorderType? b)
+            {
+                if (b == null || b.Val?.Value == BorderValues.None) return null;
+                return new PageBorderSide
+                {
+                    Val = b.Val?.Value.ToString().ToLower() ?? "none",
+                    Size = (b.Size?.Value ?? 4) / 8f, // sz is in 1/8 pt
+                    Space = (b.Space?.Value ?? 0),   // space is in pt
+                    Color = StyleHelper.HexToBaseColor(b.Color?.Value ?? "000000") ?? iTextBaseColor.Black
+                };
+            }
+
+            options.Top = ParseSide(pgBorders.TopBorder);
+            options.Bottom = ParseSide(pgBorders.BottomBorder);
+            options.Left = ParseSide(pgBorders.LeftBorder);
+            options.Right = ParseSide(pgBorders.RightBorder);
+
+            _options.PageBorders = options;
+        }
+        else
+        {
+            _options.PageBorders = null;
+        }
     }
 
     private static bool HasAnyHeaderFooter(Body body, SectionProperties? firstSection)
@@ -1770,5 +1818,65 @@ internal class CombinedPageEvent : PdfPageEventHelper
     public override void OnCloseDocument(PdfWriter writer, iTextDocument document)
     {
         foreach (var e in _events) e.OnCloseDocument(writer, document);
+    }
+}
+
+/// <summary>页面边框渲染器</summary>
+internal class PageBorderEvent : PdfPageEventHelper
+{
+    private readonly PageBorderOptions _borders;
+    private readonly ConvertOptions _options;
+
+    public PageBorderEvent(PageBorderOptions borders, ConvertOptions options)
+    {
+        _borders = borders;
+        _options = options;
+    }
+
+    public override void OnEndPage(PdfWriter writer, iTextDocument document)
+    {
+        var cb = writer.DirectContent;
+        var rect = document.PageSize;
+
+        cb.SaveState();
+
+        void DrawSide(PageBorderSide? side, float x1, float y1, float x2, float y2)
+        {
+            if (side == null || side.Val == "none") return;
+
+            // Simple solid line for now
+            cb.SetLineWidth(side.Size);
+            cb.SetColorStroke(side.Color);
+            cb.MoveTo(x1, y1);
+            cb.LineTo(x2, y2);
+            cb.Stroke();
+        }
+
+        float top = rect.Top;
+        float bottom = rect.Bottom;
+        float left = rect.Left;
+        float right = rect.Right;
+
+        if (_borders.OffsetFrom == "text")
+        {
+            top -= _options.MarginTop - (_borders.Top?.Space ?? 0);
+            bottom += _options.MarginBottom - (_borders.Bottom?.Space ?? 0);
+            left += _options.MarginLeft - (_borders.Left?.Space ?? 0);
+            right -= _options.MarginRight - (_borders.Right?.Space ?? 0);
+        }
+        else // offsetFrom == "page"
+        {
+            top -= (_borders.Top?.Space ?? 24);
+            bottom += (_borders.Bottom?.Space ?? 24);
+            left += (_borders.Left?.Space ?? 24);
+            right -= (_borders.Right?.Space ?? 24);
+        }
+
+        DrawSide(_borders.Top, left, top, right, top);
+        DrawSide(_borders.Bottom, left, bottom, right, bottom);
+        DrawSide(_borders.Left, left, bottom, left, top);
+        DrawSide(_borders.Right, right, bottom, right, top);
+
+        cb.RestoreState();
     }
 }

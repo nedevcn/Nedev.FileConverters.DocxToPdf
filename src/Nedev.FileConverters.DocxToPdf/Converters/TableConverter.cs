@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml;
+ï»¿using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.Helpers;
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
@@ -80,10 +80,32 @@ public class TableConverter
 
         var pdfTable = new PdfPTable(columnCount)
         {
-            WidthPercentage = 100,
             SpacingBefore = 6f,
             SpacingAfter = 6f
         };
+
+        var tableWidth = tableProps?.TableWidth;
+        if (tableWidth?.Type?.Value == TableWidthUnitValues.Pct && tableWidth.Width?.Value != null)
+        {
+            if (float.TryParse(tableWidth.Width.Value, out var pct))
+                pdfTable.WidthPercentage = pct / 50f;
+            else
+                pdfTable.WidthPercentage = 100;
+        }
+        else if (tableWidth?.Type?.Value == TableWidthUnitValues.Dxa && tableWidth.Width?.Value != null)
+        {
+            var widthPt = StyleHelper.DxaToPoints(tableWidth.Width.Value);
+            if (widthPt > 0 && widthPt <= pageWidth)
+            {
+                pdfTable.TotalWidth = widthPt;
+                pdfTable.LockedWidth = true;
+            }
+            else pdfTable.WidthPercentage = 100;
+        }
+        else
+        {
+            pdfTable.WidthPercentage = 100;
+        }
 
         // ????
         if (colWidths != null && colWidths.Length == columnCount)
@@ -471,10 +493,10 @@ public class TableConverter
             var left = GetTableCellMarginSidePoints(tableDefaultCellMar, "left");
             var right = GetTableCellMarginSidePoints(tableDefaultCellMar, "right");
 
-            if (top.HasValue) pdfCell.PaddingTop = top.Value;
-            if (bottom.HasValue) pdfCell.PaddingBottom = bottom.Value;
-            if (left.HasValue) pdfCell.PaddingLeft = left.Value;
-            if (right.HasValue) pdfCell.PaddingRight = right.Value;
+            pdfCell.PaddingTop = top ?? 2f;
+            pdfCell.PaddingBottom = bottom ?? 2f;
+            pdfCell.PaddingLeft = left ?? 5.4f;
+            pdfCell.PaddingRight = right ?? 5.4f;
         }
         else
         {
@@ -703,7 +725,7 @@ public class TableConverter
         // ?????
         SetCellBorders(pdfCell, cellProps, tableBorders, _colorScheme, rowIndex, colIndex, rowCount, columnCount, colSpan);
 
-        // ????? — ??(???????)
+        // ????? ï¿½ ??(???????)
         void AddParagraph(WParagraph para)
         {
             var pdfElements = _paragraphConverter.Convert(para, forceBold);
@@ -987,8 +1009,8 @@ public class TableConverter
         if (pdfCell.BorderWidthLeft > 0) pdfCell.BorderColorLeft = cl ?? defaultColor;
         if (pdfCell.BorderWidthRight > 0) pdfCell.BorderColorRight = cr ?? defaultColor;
 
-        if (rowIndex != 0) pdfCell.BorderWidthTop = 0;
-        if (colIndex != 0) pdfCell.BorderWidthLeft = 0;
+        // Border collapsing is handled by PdfPTable logic. 
+        // Explicit BorderValues.None checks follow below.
 
         // ????:?????????,??????0,??????????(iTextSharp ??)
         // ??????????????????0

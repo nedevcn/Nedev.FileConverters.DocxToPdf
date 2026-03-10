@@ -123,6 +123,11 @@ public class ConvertOptions
     public bool AddRevisionsSummaryPage { get; set; } = false;
 
     /// <summary>
+    /// 邮件合并数据字段（FieldName -> Value）
+    /// </summary>
+    public Dictionary<string, string> MergeData { get; set; } = new();
+
+    /// <summary>
     /// 脚注编号格式（"arabic", "roman", "alpha", "chinese"）
     /// </summary>
     public string FootnoteNumberFormat { get; set; } = "arabic";
@@ -166,6 +171,33 @@ public class ConvertOptions
     /// 当前节的行号设置
     /// </summary>
     public LineNumberSettings? LineNumberSettings { get; set; }
+
+    /// <summary>
+    /// 页面边框设置
+    /// </summary>
+    public PageBorderOptions? PageBorders { get; set; }
+}
+
+/// <summary>
+/// 页面边框设置
+/// </summary>
+public class PageBorderOptions
+{
+    public PageBorderSide? Top { get; set; }
+    public PageBorderSide? Bottom { get; set; }
+    public PageBorderSide? Left { get; set; }
+    public PageBorderSide? Right { get; set; }
+    
+    /// <summary>边框相对于页面还是正文 (page, text)</summary>
+    public string OffsetFrom { get; set; } = "page";
+}
+
+public class PageBorderSide
+{
+    public string Val { get; set; } = "none";
+    public float Size { get; set; } = 0.5f; // pt
+    public float Space { get; set; } = 0f; // pt
+    public BaseColor Color { get; set; } = BaseColor.Black;
 }
 
 /// <summary>

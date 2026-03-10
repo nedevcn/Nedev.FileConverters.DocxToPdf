@@ -124,6 +124,14 @@ public class Phrase : IElement
         _chunks.Add(chunk);
     }
 
+    public void Add(IElement element)
+    {
+        if (element is Chunk c) _chunks.Add(c);
+        // If it's not a chunk, we might need a different list or handling
+        // but for now our Phrase limited to chunks. 
+        // We'll add a general Elements list to Paragraph instead.
+    }
+
     public void Add(string text)
     {
         _chunks.Add(new Chunk(text, Font));
@@ -165,6 +173,9 @@ public class Paragraph : Phrase
     public int? OutlineLevel { get; set; }
     public Action<Paragraph, int>? RenderedCallback { get; set; }
 
+    private readonly List<IElement> _extraElements = [];
+    public IEnumerable<IElement> ExtraElements => _extraElements;
+
     public new int Type => 2;
 
     public Paragraph(string? text = null, Font? font = null) : base(text, font) { }
@@ -176,6 +187,12 @@ public class Paragraph : Phrase
             Add(chunk);
         }
         Leading = phrase.Leading;
+    }
+
+    public void Add(IElement element)
+    {
+        if (element is Chunk c) base.Add(c);
+        else _extraElements.Add(element);
     }
 
     public void SetLeading(float fixedLeading, float multipliedLeading)

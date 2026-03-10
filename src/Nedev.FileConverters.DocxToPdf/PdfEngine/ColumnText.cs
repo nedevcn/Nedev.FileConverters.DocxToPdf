@@ -299,6 +299,11 @@ public class ColumnText
             y -= lineHeight;
         }
 
+        foreach (var extra in para.ExtraElements)
+        {
+            y = RenderElement(extra, startInline, y, availableLength, simulate);
+        }
+
         return y - para.SpacingAfter;
     }
 

@@ -1,4 +1,4 @@
-using DocumentFormat.OpenXml;
+﻿using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.Helpers;
@@ -254,19 +254,6 @@ public class ImageConverter
         return null;
     }
 
-    private static void ProcessExtractedElement(IElement? element, List<IElement> elements, PdfWriter? writer)
-    {
-        if (element == null) return;
-        
-        if (element is iTextImage img && img.Alignment == iTextImage.UNDERLYING && writer != null)
-        {
-            writer.DirectContentUnder.AddImage(img);
-        }
-        else
-        {
-            elements.Add(element);
-        }
-    }
 
     /// <summary>
     /// ? Anchor ???? (?? FloatingObject)
@@ -292,7 +279,7 @@ public class ImageConverter
                 try
                 {
                     image = iTextImage.GetInstance(png);
-                    if (extent != null)
+                    if (image != null && extent != null)
                     {
                         var widthPt = StyleHelper.EmuToPoints(extent.Cx?.Value ?? 0);
                         var heightPt = StyleHelper.EmuToPoints(extent.Cy?.Value ?? 0);
@@ -351,14 +338,16 @@ public class ImageConverter
                 var relH = posH.RelativeFrom?.Value;
                 if (relH.HasValue)
                 {
-                    if (relH.Value == DW.HorizontalRelativePositionValues.Margin || relH.Value == DW.HorizontalRelativePositionValues.Page)
+                    if (relH.Value == DW.HorizontalRelativePositionValues.Margin || relH.Value == DW.HorizontalRelativePositionValues.Page ||
+                         relH.Value == DW.HorizontalRelativePositionValues.InsideMargin || relH.Value == DW.HorizontalRelativePositionValues.OutsideMargin ||
+                         relH.Value == DW.HorizontalRelativePositionValues.LeftMargin || relH.Value == DW.HorizontalRelativePositionValues.RightMargin)
                     {
-                        if (relH.Value == DW.HorizontalRelativePositionValues.Margin) ptX += _options.MarginLeft;
+                        if (relH.Value != DW.HorizontalRelativePositionValues.Page) ptX += _options.MarginLeft;
                         floatObj.PositionIsAbsolute = true;
                     }
-                    else if (relH.Value == DW.HorizontalRelativePositionValues.Column)
+                    else if (relH.Value == DW.HorizontalRelativePositionValues.Column || relH.Value == DW.HorizontalRelativePositionValues.Character)
                     {
-                        ptX += _options.MarginLeft; // ??:?????
+                        ptX += _options.MarginLeft; // Best effort relative to margin
                         floatObj.PositionIsAbsolute = true;
                     }
                 }
@@ -371,10 +360,10 @@ public class ImageConverter
                 var relV = posV.RelativeFrom?.Value;
                 if (relV.HasValue)
                 {
-                    if (relV.Value == DW.VerticalRelativePositionValues.Page)
+                    if (relV.Value == DW.VerticalRelativePositionValues.Page || 
+                         relV.Value == DW.VerticalRelativePositionValues.InsideMargin || relV.Value == DW.VerticalRelativePositionValues.OutsideMargin ||
+                         relV.Value == DW.VerticalRelativePositionValues.TopMargin || relV.Value == DW.VerticalRelativePositionValues.BottomMargin)
                     {
-                        // Page relative Y is from top of page
-                        // Convert to iText Y (from bottom) later
                         floatObj.Top = ptY; 
                         floatObj.PositionIsAbsolute = true;
                     }
@@ -385,7 +374,7 @@ public class ImageConverter
                     }
                     else if (relV.Value == DW.VerticalRelativePositionValues.Paragraph || relV.Value == DW.VerticalRelativePositionValues.Line)
                     {
-                        // ????/?:Top ?????,PositionIsAbsolute = false
+                        // 相对段落/行:Top 偏移是相对的,PositionIsAbsolute = false
                         floatObj.Top = ptY;
                         floatObj.PositionIsAbsolute = false;
                     }
@@ -456,7 +445,7 @@ public class ImageConverter
 
     private static (int PixelWidth, int PixelHeight) EstimatePixelSize(DW.Extent? extent, float pageWidth)
     {
-        // 96 DPI ?,1pt � 96/72 ??
+        // 96 DPI ?,1pt � 96/72 ??
         const float dpi = 96f;
         const float ptToPx = dpi / 72f;
 
@@ -510,8 +499,11 @@ public class ImageConverter
                 var imageBytes = SanitizeImageBytes(ms.ToArray());
 
                 var image = iTextImage.GetInstance(imageBytes);
-                image.ScaleToFit(pageWidth, pageWidth); // ????
-                image.Alignment = Element.ALIGN_CENTER;
+                if (image != null)
+                {
+                    image.ScaleToFit(pageWidth, pageWidth); // ????
+                    image.Alignment = Element.ALIGN_CENTER;
+                }
                 return image;
             }
             catch

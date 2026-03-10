@@ -1,4 +1,5 @@
 using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.Helpers;
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
@@ -23,6 +24,7 @@ public class ParagraphConverter
     private readonly IReadOnlyDictionary<string, string>? _hyperlinkTargets;
     private readonly IReadOnlyDictionary<int, int>? _footnoteNumberById;
     private readonly IReadOnlyDictionary<int, int>? _endnoteNumberById;
+    private readonly MainDocumentPart? _mainPart;
 
     /// <summary>页眉页脚渲染时提供当前页/总页数，用于 PAGE/NUMPAGES 字段</summary>
     public Func<(int Current, int Total)?>? PageNumberProvider { get; set; }
@@ -40,25 +42,15 @@ public class ParagraphConverter
     /// <summary>字段解析器：输入完整指令字符串（如 \"DATE \\@ yyyy-MM-dd\"），返回要显示的文本</summary>
     public Func<string, string?>? FieldResolver { get; set; }
 
-    /// <summary>用于页眉页脚等无超链接/脚注上下文的场景</summary>
-    public ParagraphConverter(FontHelper fontHelper, Styles? styles = null, OpenXmlElement? colorScheme = null)
-    {
-        _fontHelper = fontHelper;
-        _styles = styles;
-        _colorScheme = colorScheme;
-        _hyperlinkTargets = null;
-        _footnoteNumberById = null;
-        _endnoteNumberById = null;
-    }
-
     /// <summary>完整上下文，支持超链接、脚注尾注</summary>
     public ParagraphConverter(
         FontHelper fontHelper,
-        Styles? styles,
-        OpenXmlElement? colorScheme,
-        IReadOnlyDictionary<string, string>? hyperlinkTargets,
-        IReadOnlyDictionary<int, int>? footnoteNumberById,
-        IReadOnlyDictionary<int, int>? endnoteNumberById)
+        Styles? styles = null,
+        OpenXmlElement? colorScheme = null,
+        IReadOnlyDictionary<string, string>? hyperlinkTargets = null,
+        IReadOnlyDictionary<int, int>? footnoteNumberById = null,
+        IReadOnlyDictionary<int, int>? endnoteNumberById = null,
+        MainDocumentPart? mainPart = null)
     {
         _fontHelper = fontHelper;
         _styles = styles;
@@ -66,6 +58,7 @@ public class ParagraphConverter
         _hyperlinkTargets = hyperlinkTargets;
         _footnoteNumberById = footnoteNumberById;
         _endnoteNumberById = endnoteNumberById;
+        _mainPart = mainPart;
     }
 
     /// <summary>
@@ -302,13 +295,24 @@ public class ParagraphConverter
                     
                 // 公式支持（Office Math ML）
                 case DocumentFormat.OpenXml.Math.Paragraph mathParagraph:
-                    // 处理 OMML 公式
-                    var mathText = ConvertMathToText(mathParagraph);
-                    if (!string.IsNullOrEmpty(mathText))
+                    var mathChunks = MathHelper.ExtractMathChunks(mathParagraph);
+                    foreach (var chunk in mathChunks)
                     {
                         var mathFont = _fontHelper.GetFont(actualFontSize * 0.9f, iTextFont.NORMAL);
-                        pdfParagraph.Add(new iTextChunk(mathText, mathFont));
+                        chunk.Font = mathFont;
+                        pdfParagraph.Add(chunk);
                         hasContent = true;
+                    }
+
+                    // VML Support (WordArt, Shapes)
+                    if (_mainPart != null)
+                    {
+                        var vmlChunks = VmlHelper.ExtractVmlElements(mathParagraph, _mainPart);
+                        foreach (var chunk in vmlChunks)
+                        {
+                            pdfParagraph.Add(chunk);
+                            hasContent = true;
+                        }
                     }
                     break;
                     
@@ -893,23 +897,7 @@ public class ParagraphConverter
         return null;
     }
 
-    /// <summary>
-    /// 将 OMML 公式转换为文本表示（增强版）
-    /// </summary>
-    private static string ConvertMathToText(DocumentFormat.OpenXml.Math.Paragraph mathPara)
-    {
-        try
-        {
-            var textBuilder = new System.Text.StringBuilder();
-            ProcessMathElement(mathPara, textBuilder, 0);
-            var result = textBuilder.ToString().Trim();
-            return string.IsNullOrEmpty(result) ? mathPara.InnerText : result;
-        }
-        catch
-        {
-            return mathPara.InnerText;
-        }
-    }
+
     
     /// <summary>
     /// 处理复杂字段（由 FieldBegin、FieldSeparator、FieldEnd 组成）
@@ -1018,147 +1006,7 @@ public class ParagraphConverter
         }
     }
 
-    private static void ProcessMathElement(DocumentFormat.OpenXml.OpenXmlElement element, System.Text.StringBuilder builder, int indentLevel)
-    {
-        var indent = new string(' ', indentLevel * 2);
-        
-        foreach (var mathElement in element.Descendants())
-        {
-            switch (mathElement.LocalName)
-            {
-                // 基础文本节点
-                case "t":
-                    if (mathElement is DocumentFormat.OpenXml.Math.Text mathText && !string.IsNullOrEmpty(mathText.Text))
-                    {
-                        builder.Append(mathText.Text);
-                    }
-                    break;
-                    
-                // 分数：f(num, den)
-                case "f":
-                    var frac = mathElement;
-                    var num = frac.Descendants().FirstOrDefault(e => e.LocalName == "num")?.InnerText ?? "";
-                    var den = frac.Descendants().FirstOrDefault(e => e.LocalName == "den")?.InnerText ?? "";
-                    builder.Append("(").Append(num).Append(")/(").Append(den).Append(")");
-                    break;
-                    
-                // 根号：√(expression)
-                case "sRad":
-                    var radExpr = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    builder.Append("√(").Append(radExpr).Append(")");
-                    break;
-                    
-                // 上标：base^sup
-                case "sSup":
-                    var supBase = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var sup = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sup")?.InnerText ?? "";
-                    builder.Append(supBase).Append("^").Append(sup);
-                    break;
-                    
-                // 下标：base_sub
-                case "sSub":
-                    var subBase = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var sub = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sub")?.InnerText ?? "";
-                    builder.Append(subBase).Append("_").Append(sub);
-                    break;
-                    
-                // 上下标：base_sub^sup
-                case "sSubSup":
-                    var ssBase = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var ssSub = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sub")?.InnerText ?? "";
-                    var ssSup = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sup")?.InnerText ?? "";
-                    builder.Append(ssBase).Append("_").Append(ssSub).Append("^").Append(ssSup);
-                    break;
-                    
-                // 矩阵
-                case "m":
-                    builder.Append("[矩阵]");
-                    break;
-                    
-                // 括号/分隔符
-                case "d":
-                    var dExpr = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var openBracket = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "begChr")?.InnerText ?? "(";
-                    var closeBracket = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "endChr")?.InnerText ?? ")";
-                    builder.Append(openBracket).Append(dExpr).Append(closeBracket);
-                    break;
-                    
-                // 重音符号
-                case "acc":
-                    var accExpr = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var accChar = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "chr")?.InnerText ?? "¯";
-                    builder.Append(accChar).Append(accExpr);
-                    break;
-                    
-                // 极限
-                case "lim":
-                    builder.Append("lim");
-                    break;
-                    
-                case "limLow":
-                    var limBase = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var limSub = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sub")?.InnerText ?? "";
-                    builder.Append("lim_(").Append(limSub).Append(") ").Append(limBase);
-                    break;
-                    
-                case "limUp":
-                    var limUpBase = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    var limUpSub = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sub")?.InnerText ?? "";
-                    builder.Append("lim^(").Append(limUpSub).Append(") ").Append(limUpBase);
-                    break;
-                    
-                // 积分
-                case "integral":
-                    builder.Append("∫");
-                    break;
-                    
-                case "nary":
-                    var narySub = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sub")?.InnerText ?? "";
-                    var narySup = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "sup")?.InnerText ?? "";
-                    var naryExpr = mathElement.Descendants().FirstOrDefault(e => e.LocalName == "e")?.InnerText ?? "";
-                    builder.Append("∫");
-                    if (!string.IsNullOrEmpty(narySub)) builder.Append("_").Append(narySub);
-                    if (!string.IsNullOrEmpty(narySup)) builder.Append("^").Append(narySup);
-                    builder.Append("(").Append(naryExpr).Append(")");
-                    break;
-                    
-                // 求和
-                case "sum":
-                    builder.Append("∑");
-                    break;
-                    
-                // 乘积
-                case "prod":
-                    builder.Append("∏");
-                    break;
-                    
-                // 方程组
-                case "eqArr":
-                    builder.Append("{");
-                    var eqs = mathElement.Descendants().Where(e => e.LocalName == "e").Select(e => e.InnerText).Take(10);
-                    builder.Append(string.Join("; ", eqs));
-                    builder.Append("}");
-                    break;
-                    
-                // 分组
-                case "e":
-                    var exprText = mathElement.InnerText;
-                    if (!string.IsNullOrWhiteSpace(exprText))
-                    {
-                        builder.Append("(").Append(exprText).Append(")");
-                    }
-                    break;
-                    
-                // 默认：提取文本
-                default:
-                    if (!string.IsNullOrEmpty(mathElement.InnerText))
-                    {
-                        builder.Append(indent).Append(mathElement.InnerText.Trim()).Append(" ");
-                    }
-                    break;
-            }
-        }
-    }
+
 
     /// <summary>
     /// 检查 Run 是否属于插入的修订

@@ -10,10 +10,11 @@ A high-performance .NET 10 library and CLI tool for converting DOCX files to PDF
     - Tables with cell merging, borders, and custom background colors.
     - Images (Inline and Floating) with support for text wrapping (Square, Tight, Through, Top/Bottom).
     - Hyperlinks and Bookmarks (both <w:hyperlink> elements and HYPERLINK fields preserve display text and produce clickable links).
-    - Basic handling of complex fields (using FieldChar/FieldCode) – common cases like PAGE, DATE, REF, MERGEFIELD, and HYPERLINK are resolved, but full OpenXML FieldChar semantics are not implemented.
-- **Advanced Layout**:
-    - Multi-column page layouts.
-    - Section-specific page settings (size, margins, orientation).
+    - Basic handling of complex fields (using FieldChar/FieldCode) – common cases like PAGE, DATE, REF, MERGEFIELD, and HYPERLINK are resolved.
+- **Advanced Layout & Styling**:
+    - Page Borders (pgBorders) with support for custom colors, sizes, and offsets (Page/Text).
+    - Basic VML Shape support (WordArt, Rect, Oval) with fill and stroke styling.
+    - Multi-column page layouts and section-specific settings.
     - Headers and Footers (Different first page, even/odd support).
 - **Professional Enhancements**:
     - Dynamic Watermarks (Text-based).
