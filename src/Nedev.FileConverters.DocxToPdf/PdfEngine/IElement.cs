@@ -169,6 +169,15 @@ public class Paragraph : Phrase
 
     public Paragraph(string? text = null, Font? font = null) : base(text, font) { }
 
+    public Paragraph(Phrase phrase) : base(null, phrase.Font)
+    {
+        foreach (var chunk in phrase.Chunks)
+        {
+            Add(chunk);
+        }
+        Leading = phrase.Leading;
+    }
+
     public void SetLeading(float fixedLeading, float multipliedLeading)
     {
         Leading = fixedLeading;

@@ -11,4 +11,5 @@ public class SectionPageSettings
     public float MarginBottom { get; set; }
     public float HeaderDistance { get; set; }
     public float FooterDistance { get; set; }
+    public TextDirection TextDirection { get; set; } = TextDirection.Horizontal;
 }

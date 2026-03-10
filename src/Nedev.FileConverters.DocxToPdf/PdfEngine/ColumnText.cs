@@ -28,6 +28,9 @@ public class ColumnText
     public int CurrentLineNumber { get; set; } = 1;
     private int _lastPageNumber = 0;
 
+    // 文本方向
+    public TextDirection TextDirection { get; set; } = TextDirection.Horizontal;
+
     public ColumnText(PdfContentByte canvas)
     {
         _canvas = canvas;
@@ -57,7 +60,10 @@ public class ColumnText
         _lly = lly;
         _urx = urx;
         _ury = ury;
-        _yLine = ury;
+        if (TextDirection == TextDirection.Vertical)
+            _yLine = urx;
+        else
+            _yLine = ury;
     }
 
     public void AddElement(IElement element)
@@ -72,20 +78,46 @@ public class ColumnText
 
         foreach (var element in _elements)
         {
-            if (_yLine <= _lly)
+            if (TextDirection == TextDirection.Vertical)
             {
-                remaining.Add(element);
-                hasMoreText = true;
-                continue;
+                if (_yLine <= _llx) // 左边界
+                {
+                    remaining.Add(element);
+                    hasMoreText = true;
+                    continue;
+                }
+            }
+            else
+            {
+                if (_yLine <= _lly) // 下边界
+                {
+                    remaining.Add(element);
+                    hasMoreText = true;
+                    continue;
+                }
             }
 
             if (!simulate)
             {
-                _yLine = RenderElement(element, _llx, _yLine, _urx);
+                if (TextDirection == TextDirection.Vertical)
+                {
+                    _yLine = RenderElement(element, _ury, _yLine, _lly);
+                }
+                else
+                {
+                    _yLine = RenderElement(element, _llx, _yLine, _urx);
+                }
             }
             else
             {
-                _yLine -= EstimateHeight(element, _urx - _llx);
+                if (TextDirection == TextDirection.Vertical)
+                {
+                    _yLine -= EstimateHeight(element, _ury - _lly);
+                }
+                else
+                {
+                    _yLine -= EstimateHeight(element, _urx - _llx);
+                }
             }
         }
 
@@ -96,49 +128,80 @@ public class ColumnText
         return NO_MORE_TEXT;
     }
 
-    private float RenderElement(IElement element, float x, float y, float maxX, bool simulate = false)
+    /// <summary>
+    /// 渲染元素
+    /// </summary>
+    /// <param name="element">元素</param>
+    /// <param name="startInline">内联起始位置 (Horizontal: Left, Vertical: Top)</param>
+    /// <param name="startBlock">块起始位置 (Horizontal: Top, Vertical: Right)</param>
+    /// <param name="limitInline">内联限制位置 (Horizontal: Right, Vertical: Bottom)</param>
+    /// <param name="simulate">是否模拟</param>
+    /// <returns>新的块位置 (Horizontal: newY, Vertical: newX)</returns>
+    private float RenderElement(IElement element, float startInline, float startBlock, float limitInline, bool simulate = false)
     {
-        var width = maxX - x;
+        var availableLength = TextDirection == TextDirection.Vertical 
+            ? startInline - limitInline // Top - Bottom
+            : limitInline - startInline; // Right - Left
 
         switch (element)
         {
             case Paragraph para:
-                return RenderParagraph(para, x, y, width, simulate);
+                return RenderParagraph(para, startInline, startBlock, availableLength, simulate);
             case Chunk chunk:
-                return RenderChunk(chunk, x, y, simulate);
+                if (TextDirection == TextDirection.Vertical)
+                {
+                    RenderChunkVertical(chunk, startBlock, startInline, simulate);
+                    return startBlock;
+                }
+                return RenderChunk(chunk, startInline, startBlock, simulate);
             case Phrase phrase:
-                return RenderPhrase(phrase, x, y, simulate);
+                return RenderParagraph(new Paragraph(phrase), startInline, startBlock, availableLength, simulate);
             case PdfPTable table:
-                return RenderTable(table, x, y, width, simulate);
+                return RenderTable(table, startInline, startBlock, availableLength, simulate);
             case List list:
-                return RenderList(list, x, y, width, simulate);
+                return RenderList(list, startInline, startBlock, availableLength, simulate);
             case Image img:
                 if (!simulate)
                 {
                     _canvas.SaveState();
-                    _canvas.AddImage(img, x, y - img.ScaledHeight);
+                    if (TextDirection == TextDirection.Vertical)
+                        _canvas.AddImage(img, startBlock - img.ScaledWidth, startInline - img.ScaledHeight); // 简单放置，暂不支持旋转
+                    else
+                        _canvas.AddImage(img, startInline, startBlock - img.ScaledHeight);
                     _canvas.RestoreState();
                 }
-                return y - img.ScaledHeight - 4f; // Add a small margin
+                return startBlock - (TextDirection == TextDirection.Vertical ? img.ScaledWidth : img.ScaledHeight) - 4f; 
             default:
                 if (element.Type == -100) // FloatingObject
                 {
+                    // 浮动对象暂不支持竖排特殊处理，按绝对位置绘制
                     var floatObj = element as global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject;
                     if (floatObj != null && !simulate)
                     {
                         var imgObj = floatObj.Image;
                         _canvas.SaveState();
-                        _canvas.AddImage(imgObj, floatObj.Left, floatObj.PositionIsAbsolute ? floatObj.Top : y - floatObj.Top - imgObj.ScaledHeight);
+                        _canvas.AddImage(imgObj, floatObj.Left, floatObj.PositionIsAbsolute ? floatObj.Top : startBlock - floatObj.Top - imgObj.ScaledHeight);
                         _canvas.RestoreState();
                     }
-                    return floatObj != null && floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Inline ? y - floatObj.Height : y;
+                    return floatObj != null && floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Inline 
+                        ? startBlock - (TextDirection == TextDirection.Vertical ? floatObj.Width : floatObj.Height) 
+                        : startBlock;
                 }
-                return y;
+                return startBlock;
         }
     }
 
-    private float RenderParagraph(Paragraph para, float x, float y, float width, bool simulate = false)
+    private float RenderParagraph(Paragraph para, float startInline, float startBlock, float availableLength, bool simulate = false)
     {
+        if (TextDirection == TextDirection.Vertical)
+        {
+            return RenderParagraphVertical(para, startInline, startBlock, availableLength, simulate);
+        }
+
+        var x = startInline;
+        var y = startBlock;
+        var width = availableLength;
+        // ... (rest of RenderParagraph horizontal logic)
         var lineHeight = para.Leading + para.Font.Size * para.MultipliedLeading;
         if (lineHeight <= 0) lineHeight = para.Font?.Size * para.MultipliedLeading ?? 16f; // Fallback
 
@@ -239,8 +302,129 @@ public class ColumnText
         return y - para.SpacingAfter;
     }
 
-    private float RenderChunk(Chunk chunk, float x, float y, bool simulate = false)
+    private float RenderParagraphVertical(Paragraph para, float topY, float rightX, float height, bool simulate = false)
     {
+        // 竖排：startInline 是 topY，startBlock 是 rightX，availableLength 是 height
+        // 字符从上到下排列，行从右到左排列
+        
+        // 竖排行高 = 字符宽度（或字号）+ 行距
+        // 简单起见，假设竖排时行高由字号决定（横向宽度）
+        var lineWidth = para.Leading + para.Font.Size * para.MultipliedLeading;
+        if (lineWidth <= 0) lineWidth = para.Font?.Size * para.MultipliedLeading ?? 16f;
+
+        // 右边距（段前距）
+        rightX -= para.SpacingBefore;
+
+        // 计算可用高度（减去缩进）
+        // IndentationLeft 在竖排中对应 Top 缩进？还是 Right 缩进？
+        // 通常 IndentationLeft 是段落起始边的缩进。
+        // 竖排起始边是 Top。所以 IndentationLeft -> Top Indent, IndentationRight -> Bottom Indent.
+        float availableHeight = height - para.IndentationLeft - para.IndentationRight;
+        if (availableHeight < 0) availableHeight = 0;
+
+        // 分行逻辑
+        var lines = new List<(List<Chunk> chunks, float lineLength)>();
+        var currentLine = new List<Chunk>();
+        float currentLineLength = 0;
+        bool firstChunkOnLine = true;
+
+        foreach (var chunk in para.Chunks)
+        {
+            // 竖排字符高度：
+            // CJK: 字号
+            // Latin: 旋转后宽度 -> 字号
+            // 简单假设所有字符高度 = font.Size
+            // 如果内容包含字符串，需要逐字符计算高度
+            // 这里简化：Chunk.GetWidth() 返回的是水平宽度。对于等宽中文字体，宽度=高度。
+            // 对于非等宽字体，高度通常是固定的（字号）。
+            // 我们假设 chunk 的“竖向长度”等于 chunk.Content.Length * chunk.Font.Size (简单估算)
+            // 或者更准确：调用 GetWidthPoint() 但假设它是竖向的？
+            // 更好的方法：RenderChunkVertical 负责绘制。这里只负责分行。
+            // 假设每个字符高度 = Font.Size。
+            
+            float chunkHeight = 0;
+            if (!string.IsNullOrEmpty(chunk.Content))
+            {
+                // 简单估算：每个字符高度 = Font.Size
+                // 实际应区分半角全角
+                // 这里暂时用 GetWidth() 近似，因为 CJK 宽度=高度。
+                chunkHeight = chunk.GetWidth(); 
+            }
+
+            if (!firstChunkOnLine && currentLineLength + chunkHeight > availableHeight && currentLine.Count > 0)
+            {
+                lines.Add((currentLine, currentLineLength));
+                currentLine = new List<Chunk>();
+                currentLineLength = 0;
+                firstChunkOnLine = true;
+            }
+
+            currentLine.Add(chunk);
+            currentLineLength += chunkHeight;
+            firstChunkOnLine = false;
+        }
+        if (currentLine.Count > 0)
+        {
+            lines.Add((currentLine, currentLineLength));
+        }
+
+        // 渲染每一行
+        bool firstLine = true;
+        foreach (var (chunks, lineLen) in lines)
+        {
+            // 计算当前行的起始 Y (Top)
+            // IndentationLeft -> Top Indent
+            float startY = topY - para.IndentationLeft;
+            if (firstLine)
+            {
+                startY -= para.FirstLineIndent;
+                firstLine = false;
+            }
+
+            // 对齐处理
+            if (para.Alignment == Element.ALIGN_CENTER)
+            {
+                startY -= Math.Max(0, (availableHeight - lineLen) / 2f);
+            }
+            else if (para.Alignment == Element.ALIGN_RIGHT) // Bottom Align in Vertical
+            {
+                startY -= Math.Max(0, availableHeight - lineLen);
+            }
+
+            var currentY = startY;
+            
+            // 绘制当前行字符
+            // 字符中心 X 对齐到 rightX - lineWidth/2 ? 
+            // 或者 rightX 是行的右边界。字符画在 rightX - lineWidth 到 rightX 之间。
+            // 字符中心 X = rightX - lineWidth / 2。
+            // 简化：字符画在 rightX - Font.Size (假设 lineWidth ~ Font.Size)
+            
+            foreach (var chunk in chunks)
+            {
+                // RenderChunkVertical
+                // 需要返回新的 Y 位置
+                currentY = RenderChunkVertical(chunk, rightX, currentY, simulate);
+            }
+
+            // 行号暂不支持竖排
+            
+            // 推进到下一行（向左）
+            rightX -= lineWidth;
+        }
+
+        return rightX - para.SpacingAfter;
+    }
+
+    private float RenderChunk(Chunk chunk, float startInline, float startBlock, bool simulate = false)
+    {
+        if (TextDirection == TextDirection.Vertical)
+        {
+            return RenderChunkVertical(chunk, startBlock, startInline, simulate);
+        }
+
+        var x = startInline;
+        var y = startBlock;
+
         if (string.IsNullOrEmpty(chunk.Content)) return y;
 
         if (!simulate)
@@ -284,15 +468,114 @@ public class ColumnText
         return y;
     }
 
-    private float RenderPhrase(Phrase phrase, float x, float y, bool simulate = false)
+    private float RenderChunkVertical(Chunk chunk, float x, float y, bool simulate = false)
     {
-        var currentX = x;
+        if (string.IsNullOrEmpty(chunk.Content)) return y;
+
+        // x 是行右边，y 是当前字符顶端
+        // 字符从上往下排，y 递减
+        // 字符宽度（竖向高度）
+        
+        // 简单实现：逐字绘制
+        foreach (var c in chunk.Content)
+        {
+            // 字符高度 = 字体大小 (近似)
+            float charHeight = chunk.Font.Size; 
+            // 字符宽度 = 字体大小 (近似)
+            float charWidth = chunk.Font.Size;
+            
+            // 字符中心 X
+            float charCenterX = x - charWidth / 2;
+            
+            if (!simulate)
+            {
+                _canvas.SaveState();
+                _canvas.BeginText();
+                _canvas.SetFontAndSize("F1", chunk.Font.Size);
+                
+                // 判断是否需要旋转
+                // CJK: 保持正向
+                // Latin: 旋转 90 度
+                bool isCJK = (c >= '\u4e00' && c <= '\u9fff') || (c >= '\u3000' && c <= '\u303f') || (c >= '\uff00' && c <= '\uffef');
+                
+                // 基线位置
+                // 如果是 CJK，基线在 Top - Ascent。
+                // 如果是 Latin，旋转后基线在哪里？
+                // 旋转 90 度：SetTextMatrix(0, -1, 1, 0, x, y)
+                // 字符原点在 (x,y)，向右是 -Y，向上是 X。
+                
+                if (isCJK)
+                {
+                    // CJK 正向绘制
+                    // 居中：X = charCenterX - charWidth/2 ? No, ShowText starts at X.
+                    // 如果字体是 Monospace，X 就是 Left。
+                    // 假设 Left = x - charWidth
+                    float drawX = x - charWidth;
+                    float drawY = y - charHeight * 0.8f; // 基线
+                    
+                    _canvas.SetTextMatrix(1, 0, 0, 1, drawX, drawY);
+                    _canvas.ShowText(c.ToString());
+                }
+                else
+                {
+                    // Latin 旋转 90 度 (顺时针)
+                    // 顺时针旋转 90度： cos=-90? No. Clockwise from X axis -> -90 deg?
+                    // PDF Rotation is Counter-Clockwise.
+                    // To rotate Clockwise 90 deg, we need -90 deg (270).
+                    // cos(-90) = 0, sin(-90) = -1.
+                    // Matrix: cos sin -sin cos x y
+                    // 0 -1 1 0 x y
+                    
+                    // 绘制点：
+                    // 字符原点 (0,0) -> 旋转后 (0,0)
+                    // 字符向右 (1,0) -> 旋转后 (0,-1) (Down)
+                    // 字符向上 (0,1) -> 旋转后 (1,0) (Right)
+                    
+                    // 我们希望字符顶部对齐到 y，中心对齐到 charCenterX
+                    // 旋转后，字符向右变成向下。
+                    // 字符“宽度”变成高度。
+                    // 原点应该在 (charCenterX + height/2, y) ? 
+                    // 调整位置比较 tricky。
+                    
+                    // 简单尝试：放置在 (x - charWidth/2, y)
+                    float drawX = x - charWidth * 0.2f; // 微调
+                    float drawY = y;
+                    
+                    _canvas.SetTextMatrix(0, -1, 1, 0, drawX, drawY);
+                    _canvas.ShowText(c.ToString());
+                }
+                
+                _canvas.EndText();
+                _canvas.RestoreState();
+            }
+            
+            y -= charHeight;
+        }
+
+        return y;
+    }
+
+    private float RenderPhrase(Phrase phrase, float startInline, float startBlock, bool simulate = false)
+    {
+        var currentInline = startInline;
         foreach (var chunk in phrase.Chunks)
         {
-            RenderChunk(chunk, currentX, y, simulate);
-            currentX += chunk.GetWidth();
+            if (TextDirection == TextDirection.Vertical)
+            {
+                // Vertical: startInline is Top, decreases (y)
+                currentInline = RenderChunkVertical(chunk, startBlock, currentInline, simulate);
+            }
+            else
+            {
+                RenderChunk(chunk, currentInline, startBlock, simulate);
+                currentInline += chunk.GetWidth();
+            }
         }
-        return y - phrase.Font.Size;
+        
+        if (TextDirection == TextDirection.Vertical)
+            return startBlock; // Phrase rendering doesn't advance block, paragraph does
+        else
+            return startBlock - phrase.Font.Size; // Approximate height for horizontal
     }
 
     private float RenderTable(PdfPTable table, float x, float y, float width, bool simulate = false)

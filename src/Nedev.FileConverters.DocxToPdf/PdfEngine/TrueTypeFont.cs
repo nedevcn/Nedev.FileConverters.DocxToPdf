@@ -70,7 +70,8 @@ public class TrueTypeFont
             var checksum = ReadUInt32();
             var offset = ReadUInt32();
             var length = ReadUInt32();
-            tables[tableTag] = (offset + _ttcOffset, length);
+            // Offset is from beginning of file, NOT relative to TTC header
+            tables[tableTag] = (offset, length);
         }
 
         // ??head?
@@ -239,25 +240,51 @@ public class TrueTypeFont
         var version = ReadUInt16();
         var numTables = ReadUInt16();
 
+        var tables = new List<(ushort platformID, ushort encodingID, uint offset)>();
+
         for (int i = 0; i < numTables; i++)
         {
             var platformID = ReadUInt16();
             var encodingID = ReadUInt16();
             var subtableOffset = ReadUInt32();
+            tables.Add((platformID, encodingID, offset + subtableOffset));
+        }
 
-            var savePos = _pos;
-            ParseCmapSubtable(offset + subtableOffset, platformID, encodingID);
-            _pos = savePos;
+        // 优先选择 Windows Unicode (3, 1) 或 (3, 10)
+        // 其次选择 Unicode (0, 3) 或 (0, 4)
+        var bestTable = tables
+            .OrderByDescending(t => GetCmapPriority(t.platformID, t.encodingID))
+            .FirstOrDefault(t => GetCmapPriority(t.platformID, t.encodingID) > 0);
+
+        if (bestTable.offset > 0)
+        {
+            Console.WriteLine($"Selected CMap: Platform {bestTable.platformID}, Encoding {bestTable.encodingID}");
+            ParseCmapSubtable(bestTable.offset);
+        }
+        else
+        {
+            Console.WriteLine("No suitable CMap found!");
         }
     }
 
-    private void ParseCmapSubtable(uint offset, ushort platformID, ushort encodingID)
+    private int GetCmapPriority(ushort platformID, ushort encodingID)
+    {
+        if (platformID == 3 && encodingID == 10) return 100; // Windows Unicode Full
+        if (platformID == 3 && encodingID == 1) return 90;   // Windows Unicode BMP
+        if (platformID == 0 && encodingID == 4) return 80;   // Unicode 2.0+
+        if (platformID == 0 && encodingID == 3) return 70;   // Unicode 2.0 BMP
+        if (platformID == 0 && encodingID == 1) return 60;   // Unicode 1.1
+        if (platformID == 3 && encodingID == 0) return 10;   // Windows Symbol (Last resort)
+        return 0;
+    }
+
+    private void ParseCmapSubtable(uint offset)
     {
         _pos = (int)offset;
         var format = ReadUInt16();
 
-        // ????????
-        if (format == 4) // ????
+        // 格式 4 (Segment mapping to delta values)
+        if (format == 4) 
         {
             var length = ReadUInt16();
             var language = ReadUInt16();
@@ -268,44 +295,68 @@ public class TrueTypeFont
             var rangeShift = ReadUInt16();
 
             var endCodes = new ushort[segCount];
-            for (int i = 0; i < segCount; i++)
-                endCodes[i] = ReadUInt16();
+            for (int i = 0; i < segCount; i++) endCodes[i] = ReadUInt16();
 
             var reservedPad = ReadUInt16();
 
             var startCodes = new ushort[segCount];
-            for (int i = 0; i < segCount; i++)
-                startCodes[i] = ReadUInt16();
+            for (int i = 0; i < segCount; i++) startCodes[i] = ReadUInt16();
 
             var idDeltas = new short[segCount];
-            for (int i = 0; i < segCount; i++)
-                idDeltas[i] = ReadInt16();
+            for (int i = 0; i < segCount; i++) idDeltas[i] = ReadInt16();
 
+            // idRangeOffsets array position
+            var idRangeOffsetsStartPos = _pos; 
             var idRangeOffsets = new ushort[segCount];
-            for (int i = 0; i < segCount; i++)
-                idRangeOffsets[i] = ReadUInt16();
+            for (int i = 0; i < segCount; i++) idRangeOffsets[i] = ReadUInt16();
 
-            // ????
+            // 映射逻辑
             for (int seg = 0; seg < segCount; seg++)
             {
-                for (uint c = startCodes[seg]; c <= endCodes[seg]; c++)
+                // Safety check for start/end codes
+                if (startCodes[seg] > endCodes[seg]) continue;
+
+                for (int c = startCodes[seg]; c <= endCodes[seg]; c++)
                 {
+                    // 0xFFFF is usually reserved
+                    if (c == 0xFFFF) continue;
+
                     int glyphId;
                     if (idRangeOffsets[seg] == 0)
                     {
-                        glyphId = (int)((c + (uint)idDeltas[seg]) & 0xFFFF);
+                        // idRangeOffset为0，直接使用idDelta
+                        glyphId = (c + idDeltas[seg]) & 0xFFFF;
                     }
                     else
                     {
-                        var rangeOffset = idRangeOffsets[seg] / 2 + (int)(c - startCodes[seg]) - (segCount - seg);
-                        glyphId = ReadUInt16At(_pos + rangeOffset * 2);
-                        if (glyphId != 0)
-                            glyphId = (glyphId + idDeltas[seg]) & 0xFFFF;
+                        // idRangeOffset不为0，依靠偏移量查找glyphIdArray
+                        // Address = &idRangeOffsets[seg] + idRangeOffsets[seg] + 2 * (c - startCodes[seg])
+                        var currentRangeOffsetAddr = idRangeOffsetsStartPos + seg * 2;
+                        var glyphIdAddr = currentRangeOffsetAddr + idRangeOffsets[seg] + 2 * (c - startCodes[seg]);
+                        
+                        if (glyphIdAddr >= 0 && glyphIdAddr + 2 <= _data.Length)
+                        {
+                            glyphId = ReadUInt16At((int)glyphIdAddr);
+                            if (glyphId != 0)
+                            {
+                                // 如果查找到的glyphId不为0，再加上idDelta
+                                // 注意：这是根据TrueType规范，有些实现可能已经加过了，但规范说要加。
+                                // 通常: *(idRangeOffsets[i] + 2*(c-startCode[i]) + &idRangeOffsets[i])
+                                // If the value obtained from the indexing operation is not 0 (which indicates missingGlyph), 
+                                // idDelta[i] is added to it to get the glyph index.
+                                glyphId = (glyphId + idDeltas[seg]) & 0xFFFF;
+                            }
+                        }
+                        else
+                        {
+                            glyphId = 0;
+                        }
                     }
 
                     if (glyphId != 0)
                     {
                         var ch = (char)c;
+                        // 覆盖旧值（如果有）
                         GlyphToUnicode[glyphId] = ch;
                         UnicodeToGlyph[ch] = glyphId;
                     }

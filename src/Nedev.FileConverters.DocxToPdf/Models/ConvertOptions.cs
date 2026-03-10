@@ -183,6 +183,15 @@ public class LineNumberSettings
     public LineNumberRestartMode RestartMode { get; set; } = LineNumberRestartMode.Continuous;
 }
 
+/// <summary>
+/// 文本流向
+/// </summary>
+public enum TextDirection
+{
+    Horizontal, // lrTb
+    Vertical    // tbRl
+}
+
 public enum LineNumberRestartMode
 {
     Continuous, // 连续

@@ -46,11 +46,11 @@ public class DocxToPdfConverter : IFileConverter
 {
     private readonly ConvertOptions _options;
     
-    private readonly Dictionary<int, SectionPageSettings> _sectionSettingsMap = new();
+    private readonly Dictionary<int, Models.SectionPageSettings> _sectionSettingsMap = new();
 
     private void CaptureSectionSettings(int sectionIndex)
     {
-        _sectionSettingsMap[sectionIndex] = new SectionPageSettings
+        _sectionSettingsMap[sectionIndex] = new Models.SectionPageSettings
         {
             PageSize = _options.PageSize,
             MarginLeft = _options.MarginLeft,
@@ -58,11 +58,13 @@ public class DocxToPdfConverter : IFileConverter
             MarginTop = _options.MarginTop,
             MarginBottom = _options.MarginBottom,
             HeaderDistance = _options.HeaderDistance,
-            FooterDistance = _options.FooterDistance
+            FooterDistance = _options.FooterDistance,
+            TextDirection = _currentTextDirection
         };
     }
 
     private ColumnInfo _currentColumnInfo = new();
+    private Models.TextDirection _currentTextDirection = Models.TextDirection.Horizontal;
 
     private class ColumnInfo
     {
@@ -238,6 +240,7 @@ public class DocxToPdfConverter : IFileConverter
         // 多栏排版管理器（需要尽早初始化以便设置页码）
         var ct = new ColumnText(writer.DirectContent);
         ct.SetAnnotationCollection(annotations);
+        ct.TextDirection = _currentTextDirection;
         ct.LineNumberSettings = _options.LineNumberSettings;
         if (_options.LineNumberSettings != null) ct.CurrentLineNumber = _options.LineNumberSettings.Start;
 
@@ -330,7 +333,18 @@ public class DocxToPdfConverter : IFileConverter
             }
 
             var colWidth = (availableWidth - (info.Count - 1) * info.Spacing) / info.Count;
-            var llx = ml + currentColumn * (colWidth + info.Spacing);
+            
+            float llx;
+            if (_currentTextDirection == Models.TextDirection.Vertical)
+            {
+                // 竖排：从右向左分栏
+                llx = pageSize.Width - mr - (currentColumn * (colWidth + info.Spacing)) - colWidth;
+            }
+            else
+            {
+                llx = ml + currentColumn * (colWidth + info.Spacing);
+            }
+
             var lly = mb;
             var urx = llx + colWidth;
             var ury = pageSize.Height - mt;
@@ -404,7 +418,7 @@ public class DocxToPdfConverter : IFileConverter
                         }
                         if (hasHeaderFooter) sectionTracker.CurrentSection = currentSectionIndex;
                         sectionBreakEncountered = false;
-                        ApplyCurrentPageSettings(pdfDocument);
+                        ApplyCurrentPageSettings(pdfDocument, ct);
 
                         // 更新行号设置
                         ct.LineNumberSettings = _options.LineNumberSettings;
@@ -418,7 +432,6 @@ public class DocxToPdfConverter : IFileConverter
                     ct.SetCurrentPage(pdfDocument.PageNumber);
                     currentColumn = 0;
                     SetColumnBounds();
-                    ct.YLine = _options.PageSize.Height - _options.MarginTop;
                     pageWidth = GetColumnWidth();
                     continue;
                 }
@@ -598,7 +611,6 @@ public class DocxToPdfConverter : IFileConverter
                         pdfDocument.NewPage();
                         ct.SetCurrentPage(pdfDocument.PageNumber);
                         currentColumn = 0;
-                        ct.YLine = _options.PageSize.Height - _options.MarginTop;
                     }
                     SetColumnBounds();
                 }
@@ -1412,10 +1424,11 @@ public class DocxToPdfConverter : IFileConverter
         return results;
     }
 
-    private void ApplyCurrentPageSettings(iTextDocument pdfDocument)
+    private void ApplyCurrentPageSettings(iTextDocument pdfDocument, iTextColumnText ct)
     {
         pdfDocument.SetPageSize(_options.PageSize);
         pdfDocument.SetMargins(_options.MarginLeft, _options.MarginRight, _options.MarginTop, _options.MarginBottom);
+        ct.TextDirection = _currentTextDirection;
     }
 
     private float GetPageContentWidth()
@@ -1485,6 +1498,17 @@ public class DocxToPdfConverter : IFileConverter
             // Header/Footer distance
             if (pageMargin.Header?.Value is uint h) _options.HeaderDistance = h / 20f;
             if (pageMargin.Footer?.Value is uint f) _options.FooterDistance = f / 20f;
+        }
+
+        // 文本方向
+        var textDir = sectionProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.TextDirection>();
+        if (textDir != null && textDir.Val?.Value == TextDirectionValues.TopToBottomRightToLeft)
+        {
+            _currentTextDirection = Models.TextDirection.Vertical;
+        }
+        else
+        {
+            _currentTextDirection = Models.TextDirection.Horizontal;
         }
 
         // 多栏支持

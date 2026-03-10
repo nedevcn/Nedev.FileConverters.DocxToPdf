@@ -1377,8 +1377,20 @@ public class PdfWriter : IDisposable
         try
         {
             _chineseFontPath = path;
-            _chineseFontData = File.ReadAllBytes(path);
-            _parsedFont = new TrueTypeFont(_chineseFontData);
+            var fontBytes = File.ReadAllBytes(path);
+            _parsedFont = new TrueTypeFont(fontBytes);
+
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+            if (ext == ".ttc")
+            {
+                _chineseFontData = null;
+                Console.WriteLine($"Loaded TTC font for metrics only (no embed): {path}");
+            }
+            else
+            {
+                _chineseFontData = fontBytes;
+                Console.WriteLine($"Loaded embeddable font: {path}");
+            }
         }
         catch (Exception ex)
         {

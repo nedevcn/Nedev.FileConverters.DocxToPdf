@@ -22,6 +22,16 @@ A high-performance .NET 10 library and CLI tool for converting DOCX files to PDF
     - Comments Summary Page generation.
 - **Custom PDF Engine**: Built on top of a specialized PDF generation layer for precise control over rendering.
 
+## 📈 Feature Completeness & Roadmap
+
+**Current State:** The library robustly handles standard document layouts including paragraphs, multi-level lists, nested tables, headers/footers, and images (inline/floating). 
+
+**Next Steps / Roadmap:**
+1. **Test Coverage Expansion:** Introduce comprehensive unit tests for `TableConverter`, `ListConverter`, `ImageConverter`, and the core `PdfEngine`.
+2. **Advanced Field Semantics:** Support fully nested OpenXML field codes and dynamic condition evaluation.
+3. **DrawingML / Math:** Add proper vector rendering for complex shapes (`<w:pict>`, `<wp:inline>`) and OMML math blocks.
+4. **Performance Tuning:** Audit memory management and stream processing for massive document (1000+ pages) conversions.
+
 ## 🛠 Technical Stack
 > **Field support:** The converter recognises both simple fields (`<w:fldSimple>`) and
 > complex fields built from `FieldChar/FieldCode` runs. Common field codes such as

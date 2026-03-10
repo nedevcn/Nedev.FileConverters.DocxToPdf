@@ -11,7 +11,7 @@ namespace Nedev.FileConverters.DocxToPdf.Converters;
 /// <summary>
 /// ? PDF ?????????
 /// </summary>
-internal class HeaderFooterRenderer
+public class HeaderFooterRenderer
 {
     private readonly MainDocumentPart _mainPart;
     private readonly ParagraphConverter _paragraphConverter;
