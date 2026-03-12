@@ -209,6 +209,32 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             // three chars of size 12
             Assert.Equal(start - 3 * 12, end, 0.1f);
         }
+
+        [Fact]
+        public void ColumnText_VerticalLatinRotationMatrix()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Vertical };
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            // add a couple of Latin letters to trigger rotation
+            ct.AddElement(new Chunk("AB", Font.Helvetica(12)));
+            ct.Go(false);
+            var stream = cb.ToString();
+            // rotation matrix should appear in content stream
+            Assert.Contains("0.000 1.000 -1.000 0.000", stream);
+        }
+
+        [Fact]
+        public void ColumnText_VerticalCjkUsesIdentityMatrix()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Vertical };
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            ct.AddElement(new Chunk("測", Font.Helvetica(12)));
+            ct.Go(false);
+            var stream = cb.ToString();
+            Assert.Contains("1.000 0.000 0.000 1.000", stream);
+        }
     }
     }
 

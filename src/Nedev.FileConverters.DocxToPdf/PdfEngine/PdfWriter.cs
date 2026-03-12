@@ -104,6 +104,14 @@ public class PdfContentByte
         _content.Append($"{encoded} Tj\n");
     }
 
+    /// <summary>
+    /// Return the accumulated drawing instructions, primarily for assertions in tests.
+    /// </summary>
+    public override string ToString()
+    {
+        return _content.ToString();
+    }
+
     private static string EncodeTextForPdf(string text)
     {
         // 对于Identity-H编码的Type0字体，需要将字符编码为CID

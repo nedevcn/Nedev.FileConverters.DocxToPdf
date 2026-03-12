@@ -612,87 +612,51 @@ public class ColumnText
 
     private float RenderChunkVertical(Chunk chunk, float x, float y, bool simulate = false)
     {
-        if (string.IsNullOrEmpty(chunk.Content)) return y;
+        if (string.IsNullOrEmpty(chunk.Content))
+            return y;
 
-        // x 是行右边，y 是当前字符顶端
-        // 字符从上往下排，y 递减
-        // 字符宽度（竖向高度）
-        
-        // 简单实现：逐字绘制
+        // x is the right edge of the column; y is the top of the current character
+        // characters flow from top to bottom, so y decreases after each glyph
         foreach (var c in chunk.Content)
         {
-            // 字符高度 = 字体大小 (近似)
-            float charHeight = chunk.Font.Size; 
-            // 字符宽度 = 字体大小 (近似)
-            float charWidth = chunk.Font.Size;
-            
-            // 字符中心 X
-            float charCenterX = x - charWidth / 2;
-            
+            float charHeight = chunk.Font.Size;   // vertical advance is always font size
+            // use font metrics for width -- more accurate for Latin letters
+            float charWidth = chunk.Font.GetWidthPoint(c.ToString());
+
             if (!simulate)
             {
                 _canvas.SaveState();
                 _canvas.BeginText();
-                // 使用 chunk 的字体族，确保在 PDF 中已注册
                 var fontName = FontFactory.IsRegistered(chunk.Font.Family) ? chunk.Font.Family : "F1";
                 _canvas.SetFontAndSize(fontName, chunk.Font.Size);
-                
-                // 判断是否需要旋转
-                // CJK: 保持正向
-                // Latin: 旋转 90 度
-                bool isCJK = (c >= '\u4e00' && c <= '\u9fff') || (c >= '\u3000' && c <= '\u303f') || (c >= '\uff00' && c <= '\uffef');
-                
-                // 基线位置
-                // 如果是 CJK，基线在 Top - Ascent。
-                // 如果是 Latin，旋转后基线在哪里？
-                // 旋转 90 度：SetTextMatrix(0, -1, 1, 0, x, y)
-                // 字符原点在 (x,y)，向右是 -Y，向上是 X。
-                
+
+                bool isCJK = (c >= '\u4e00' && c <= '\u9fff') ||
+                             (c >= '\u3000' && c <= '\u303f') ||
+                             (c >= '\uff00' && c <= '\uffef');
+
                 if (isCJK)
                 {
-                    // CJK 正向绘制
-                    // 居中：X = charCenterX - charWidth/2 ? No, ShowText starts at X.
-                    // 如果字体是 Monospace，X 就是 Left。
-                    // 假设 Left = x - charWidth
+                    // draw normally, baseline slightly below top
                     float drawX = x - charWidth;
-                    float drawY = y - charHeight * 0.8f; // 基线
-                    
+                    float drawY = y - charHeight * 0.8f;
                     _canvas.SetTextMatrix(1, 0, 0, 1, drawX, drawY);
                     _canvas.ShowText(c.ToString());
                 }
                 else
                 {
-                    // Latin 旋转 90 度 (顺时针)
-                    // 顺时针旋转 90度： cos=-90? No. Clockwise from X axis -> -90 deg?
-                    // PDF Rotation is Counter-Clockwise.
-                    // To rotate Clockwise 90 deg, we need -90 deg (270).
-                    // cos(-90) = 0, sin(-90) = -1.
-                    // Matrix: cos sin -sin cos x y
-                    // 0 -1 1 0 x y
-                    
-                    // 绘制点：
-                    // 字符原点 (0,0) -> 旋转后 (0,0)
-                    // 字符向右 (1,0) -> 旋转后 (0,-1) (Down)
-                    // 字符向上 (0,1) -> 旋转后 (1,0) (Right)
-                    
-                    // 我们希望字符顶部对齐到 y，中心对齐到 charCenterX
-                    // 旋转后，字符向右变成向下。
-                    // 字符“宽度”变成高度。
-                    // 原点应该在 (charCenterX + height/2, y) ? 
-                    // 调整位置比较 tricky。
-                    
-                    // 简单尝试：放置在 (x - charWidth/2, y)
-                    float drawX = x - charWidth * 0.2f; // 微调
+                    // rotate clockwise 90° so the character's baseline runs downwards
+                    float drawX = x - charWidth;
                     float drawY = y;
-                    
-                    _canvas.SetTextMatrix(0, -1, 1, 0, drawX, drawY);
+                    // transformation matrix [a b c d e f] where
+                    // a=0, b=1, c=-1, d=0 produces a clockwise 90° rotation
+                    _canvas.SetTextMatrix(0, 1, -1, 0, drawX, drawY);
                     _canvas.ShowText(c.ToString());
                 }
-                
+
                 _canvas.EndText();
                 _canvas.RestoreState();
             }
-            
+
             y -= charHeight;
         }
 
