@@ -1,6 +1,7 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using Nedev.FileConverters.DocxToPdf.Models;
+using Nedev.FileConverters.DocxToPdf.Rendering;
 using SkiaSharp;
 using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
@@ -52,29 +53,32 @@ public sealed class DrawingRasterizer
         if (graphicData == null) return null;
 
         var uri = graphicData.Uri?.Value ?? string.Empty;
-        string typeLabel;
-        string? summary;
 
+        // 使用 ChartRenderer 渲染图表
         if (uri.Contains("/chart", StringComparison.OrdinalIgnoreCase))
         {
-            typeLabel = "Chart";
-            summary = ExtractChartSummary(graphicData);
+            var chartRenderer = new ChartRenderer(_document, _options);
+            var chartElement = graphicData.Elements().FirstOrDefault(e => e.LocalName == "chart");
+            if (chartElement != null)
+            {
+                var result = chartRenderer.RenderToPng(chartElement, pixelWidth, pixelHeight);
+                if (result != null) return result;
+            }
+
+            // 如果渲染失败，回退到占位符
+            var summary = ExtractChartSummary(graphicData);
+            return RasterizePlaceholder("Chart", summary, pixelWidth, pixelHeight);
         }
         else if (uri.Contains("/diagram", StringComparison.OrdinalIgnoreCase))
         {
-            typeLabel = "SmartArt";
-            summary = ExtractDiagramSummary(graphicData);
+            var summary = ExtractDiagramSummary(graphicData);
+            return RasterizePlaceholder("SmartArt", summary, pixelWidth, pixelHeight);
         }
         else
         {
-            typeLabel = "Shape";
-            summary = ExtractShapeSummary(graphicData);
+            var summary = ExtractShapeSummary(graphicData);
+            return RasterizePlaceholder("Shape", summary, pixelWidth, pixelHeight);
         }
-
-        if (string.IsNullOrWhiteSpace(summary))
-            summary = ExtractDrawingTextFallback(graphicData);
-
-        return RasterizePlaceholder(typeLabel, summary, pixelWidth, pixelHeight);
     }
 
     private static A.GraphicData? FindGraphicData(OpenXmlElement element)
@@ -126,7 +130,7 @@ public sealed class DrawingRasterizer
                         parts.Add(serName);
                 }
 
-                return parts.Count > 0 ? string.Join(" � ", parts) : null;
+                return parts.Count > 0 ? string.Join(" � ", parts) : null;
             }
         }
         catch
