@@ -4,6 +4,11 @@ using SkiaSharp;
 
 namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 
+// expose encoding/regex for PdfReader to use without additional usings
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Linq; // for ToList() and LINQ helpers
+
 /// <summary>
 /// PDF内容流写入器
 /// </summary>
@@ -271,6 +276,11 @@ public class PdfWriter : IDisposable
     public bool CloseStream { get; set; } = true;
     public PdfContentByte DirectContent => _directContent;
     public PdfContentByte DirectContentUnder => _directContent;
+
+    /// <summary>
+    /// Access to the wrapped document (used by pagination logic)
+    /// </summary>
+    public PdfDocument Document => _document;
 
     private readonly Dictionary<int, string> _pageDirectContents = [];
     private int _currentPageDirectContentIdx = 1;
@@ -579,15 +589,21 @@ public class PdfWriter : IDisposable
         var cb = new PdfContentByte(page, _document);
         var y = page.PageSize.Height - page.Document.MarginTop;
 
-        foreach (var element in page.Elements)
+        var elements = page.Elements.ToList();
+        for (int idx = 0; idx < elements.Count; idx++)
         {
+            var element = elements[idx];
             y = RenderElement(cb, element, page.Document.MarginLeft, y, page.PageSize.Width - page.Document.MarginRight, writer);
 
             // 自动分页检查
             if (y < page.Document.MarginBottom)
             {
-                // 注意：当前简化实现，仅裁剪超出部分
-                // 完整分页需要将剩余元素移到下一页
+                // move remaining elements to a new page so they are not lost
+                var nextPage = _document.NewPage();
+                for (int j = idx; j < elements.Count; j++)
+                {
+                    nextPage.AddElement(elements[j]);
+                }
                 break;
             }
         }

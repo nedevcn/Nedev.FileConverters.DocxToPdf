@@ -26,9 +26,25 @@ public class PdfReader : IDisposable
 
     private void ParsePages()
     {
-        // ????:????????A4
-        // ??????PDF??
-        _pageSizes.Add(Rectangle.A4);
+        // attempt to count pages by scanning for "/Type /Page" tokens
+        try
+        {
+            var text = System.Text.Encoding.ASCII.GetString(_pdfData);
+            var matches = System.Text.RegularExpressions.Regex.Matches(text, @"/Type\s*/Page");
+            var count = matches.Count;
+            if (count <= 0)
+                count = 1;
+            for (int i = 0; i < count; i++)
+            {
+                // we don't know individual sizes yet, assume A4 as fallback
+                _pageSizes.Add(Rectangle.A4);
+            }
+        }
+        catch
+        {
+            // parsing failed; fall back to single A4 page
+            _pageSizes.Add(Rectangle.A4);
+        }
     }
 
     public Rectangle GetPageSize(int pageNum)
@@ -65,7 +81,7 @@ public class PdfStamper : IDisposable
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _outputStream = outputStream ?? throw new ArgumentNullException(nameof(outputStream));
 
-        // ??????
+        // initialize empty content buffers for each page
         for (var i = 0; i < reader.NumberOfPages; i++)
         {
             _overContent.Add(new PdfContentByte());
@@ -89,10 +105,27 @@ public class PdfStamper : IDisposable
 
     public void Close()
     {
-        // ????PDF?????
-        // ????:????????
+        // write the original PDF bytes first
         var originalData = _reader.GetPageContent(1);
         _outputStream.Write(originalData, 0, originalData.Length);
+
+        // then append any over/under content as comments so that stamping is not a no-op
+        for (int i = 0; i < _overContent.Count; i++)
+        {
+            var over = _overContent[i]?.GetContent();
+            if (!string.IsNullOrEmpty(over))
+            {
+                var comment = System.Text.Encoding.UTF8.GetBytes($"\n% OverContent page {i+1}\n{over}\n");
+                _outputStream.Write(comment, 0, comment.Length);
+            }
+            var under = _underContent[i]?.GetContent();
+            if (!string.IsNullOrEmpty(under))
+            {
+                var comment2 = System.Text.Encoding.UTF8.GetBytes($"\n% UnderContent page {i+1}\n{under}\n");
+                _outputStream.Write(comment2, 0, comment2.Length);
+            }
+        }
+
         _outputStream.Flush();
     }
 
