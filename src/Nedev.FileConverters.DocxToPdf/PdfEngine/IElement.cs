@@ -49,6 +49,12 @@ public class Chunk : IElement
     public float UnderlineThickness { get; set; } = 0.1f;
     public float UnderlineYPosition { get; set; } = -1f;
 
+    /// <summary>
+    /// Optional override for the text direction of this chunk.  If null, the
+    /// containing <see cref="ColumnText"/> direction is used.
+    /// </summary>
+    public TextDirection? DirectionOverride { get; set; }
+
     public int Type => STANDARD;
     public bool IsContent() => true;
     public bool IsNestable() => false;
@@ -93,6 +99,26 @@ public class Chunk : IElement
     }
 
     public float GetWidth() => Font.GetWidthPoint(Content);
+
+    /// <summary>
+    /// Get the advance (inline length) of this chunk in the given text
+    /// direction.  For horizontal text this is simply the width; for vertical
+    /// text we approximate by adding one font-size unit per character.
+    /// </summary>
+    public float GetAdvance(TextDirection direction)
+    {
+        if (direction == TextDirection.Vertical)
+        {
+            float adv = 0;
+            foreach (var c in Content)
+            {
+                // each glyph advances by font size (approximate)
+                adv += Font.Size;
+            }
+            return adv;
+        }
+        return GetWidth();
+    }
 }
 
 /// <summary>

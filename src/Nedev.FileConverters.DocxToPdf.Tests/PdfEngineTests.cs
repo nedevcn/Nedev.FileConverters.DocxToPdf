@@ -144,6 +144,88 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void ColumnText_MidWordBreaks()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 50, 100);
+            var para = new Paragraph("", Font.Helvetica(12));
+            para.Add(new Chunk("ABCDEFGHIJKLMNOPQRSTUVWXYZ", Font.Helvetica(12)));
+            ct.AddElement(para);
+
+            int status = ct.Go(false);
+            Assert.Equal(ColumnText.NO_MORE_COLUMN, status);
+            Assert.Single(ct.Elements);
+            var rem = ct.Elements[0] as Paragraph;
+            Assert.NotNull(rem);
+            Assert.True(rem.Chunks.Count < para.Chunks.Count ||
+                        rem.Chunks[0].Content.Length < para.Chunks[0].Content.Length);
+        }
+
+        [Fact]
+        public void ColumnText_JustifiesText()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Horizontal };
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            var para = new Paragraph("", Font.Helvetica(12)) { Alignment = Element.ALIGN_JUSTIFIED };
+            para.Add(new Chunk("A ", Font.Helvetica(12)));
+            para.Add(new Chunk("B", Font.Helvetica(12)));
+            ct.AddElement(para);
+            ct.Go(false);
+            var stream = cb.ToString();
+            var matches = System.Text.RegularExpressions.Regex.Matches(stream,
+                @"[0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ ([0-9\.\-]+) ([0-9\.\-]+) Tm");
+            Assert.True(matches.Count >= 2);
+            float x1 = float.Parse(matches[0].Groups[1].Value);
+            float x2 = float.Parse(matches[1].Groups[1].Value);
+            float wordWidth = Font.Helvetica(12).GetWidthPoint("A");
+            Assert.True(x2 - x1 > wordWidth + 1);
+        }
+
+        [Fact]
+        public void ColumnText_JustifiesInterLetterWhenNoSpaces()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Horizontal };
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            var para = new Paragraph("", Font.Helvetica(12)) { Alignment = Element.ALIGN_JUSTIFIED };
+            para.Add(new Chunk("ABC", Font.Helvetica(12)));
+            ct.AddElement(para);
+            ct.Go(false);
+            var stream = cb.ToString();
+            var matches = System.Text.RegularExpressions.Regex.Matches(stream,
+                @"[0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ ([0-9\.\-]+) ([0-9\.\-]+) Tm");
+            Assert.True(matches.Count >= 3);
+            float w = Font.Helvetica(12).GetWidthPoint("A");
+            float prevX = float.Parse(matches[0].Groups[1].Value);
+            bool sawGap = false;
+            for (int i = 1; i < matches.Count; i++)
+            {
+                float x = float.Parse(matches[i].Groups[1].Value);
+                if (x - prevX > w + 0.5f) { sawGap = true; break; }
+                prevX = x;
+            }
+            Assert.True(sawGap, "Expected some inter-letter spacing");
+        }
+
+        [Fact]
+        public void ColumnText_MixedDirectionChunks()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Horizontal };
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            var para = new Paragraph("", Font.Helvetica(12));
+            para.Add(new Chunk("Horizontal", Font.Helvetica(12)));
+            var vert = new Chunk("AB", Font.Helvetica(12)) { DirectionOverride = TextDirection.Vertical };
+            para.Add(vert);
+            ct.AddElement(para);
+            ct.Go(false);
+            var stream = cb.ToString();
+            Assert.Contains("0.000 1.000 -1.000 0.000", stream);
+        }
+
+        [Fact]
         public void PdfStamper_AppendsOverUnderContent()
         {
             var fake = System.Text.Encoding.ASCII.GetBytes("dummy");

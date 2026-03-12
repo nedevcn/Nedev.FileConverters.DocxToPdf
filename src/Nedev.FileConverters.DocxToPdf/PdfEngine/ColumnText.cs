@@ -322,7 +322,9 @@ public class ColumnText
             }
 
             var chunk = chunksList[chunkIdx];
-            var cw = chunk.GetWidth();
+            var effectiveDir = chunk.DirectionOverride ?? TextDirection;
+            var cw = chunk.GetAdvance(effectiveDir);
+            float availForThis = firstTokenOnLine ? _currentLineAvailWidth : _currentLineAvailWidth - currentLineWidth;
 
             if (firstTokenOnLine || currentLineWidth + cw <= _currentLineAvailWidth)
             {
@@ -333,12 +335,12 @@ public class ColumnText
                 continue;
             }
 
-            // Chunk overflows — split by words
+            // Chunk overflows — try splitting
             chunksList.RemoveAt(chunkIdx);
-            var subChunks = SplitChunkByWords(chunk);
+            var subChunks = SplitChunk(chunk, availForThis, effectiveDir);
             chunksList.InsertRange(chunkIdx, subChunks);
             
-            var sw = chunksList[chunkIdx].GetWidth();
+            var sw = chunksList[chunkIdx].GetAdvance(effectiveDir);
             
             // If it still overflows after splitting, break the line
             if (firstTokenOnLine || currentLineWidth + sw <= _currentLineAvailWidth)
@@ -365,10 +367,12 @@ public class ColumnText
         }
 
         // render each line applying alignment and indentation
-        foreach (var (chunks, lineWidth, lineStartX, yLine, lineAvailWidth) in lines)
+        for (int li = 0; li < lines.Count; li++)
         {
+            var (chunks, lineWidth, lineStartX, yLine, lineAvailWidth) = lines[li];
             float startX = lineStartX;
 
+            bool isLastLine = li == lines.Count - 1;
             if (para.Alignment == Element.ALIGN_CENTER)
             {
                 startX += Math.Max(0, (lineAvailWidth - lineWidth) / 2f);
@@ -379,9 +383,49 @@ public class ColumnText
             }
 
             var currentX = startX;
+            float extraGap = 0;
+            // compute gap distribution: prefer chunks that end with space
+            if (para.Alignment == Element.ALIGN_JUSTIFIED && !isLastLine && lineWidth < lineAvailWidth)
+            {
+                int spaceChunks = chunks.Count(c => c.Content.EndsWith(" "));
+                if (spaceChunks > 0)
+                {
+                    extraGap = (lineAvailWidth - lineWidth) / (float)spaceChunks;
+                }
+                else if (chunks.Count > 1)
+                {
+                    // no space gaps: break the first chunk into letters if necessary
+                    if (chunks.Count == 1 && chunks[0].Content.Length > 1)
+                    {
+                        var orig = chunks[0];
+                        var letters = orig.Content.Select(ch => new Chunk(ch.ToString(), orig.Font)
+                        {
+                            BackgroundColor = orig.BackgroundColor,
+                            TextRise = orig.TextRise,
+                            Anchor = orig.Anchor,
+                            HasUnderline = orig.HasUnderline,
+                            UnderlineThickness = orig.UnderlineThickness,
+                            UnderlineYPosition = orig.UnderlineYPosition,
+                            DirectionOverride = orig.DirectionOverride
+                        }).ToList();
+                        // replace in line
+                        lines[li] = (letters, letters.Sum(l=>l.GetWidth()));
+                        chunks = letters;
+                    }
+                    extraGap = (lineAvailWidth - lineWidth) / (float)(chunks.Count - 1);
+                }
+                if (extraGap < 0) extraGap = 0;
+            }
+
             foreach (var chunk in chunks)
             {
                 currentX = RenderChunk(chunk, currentX, yLine, simulate);
+                if (extraGap != 0)
+                {
+                    // add gap after space chunks or evenly if no spaces
+                    if (chunk.Content.EndsWith(" ") || (chunks.Count>1 && !chunks.Any(c=>c.Content.EndsWith(" "))))
+                        currentX += extraGap;
+                }
             }
 
             // 绘制行号
@@ -390,22 +434,12 @@ public class ColumnText
                 if (CurrentLineNumber % LineNumberSettings.CountBy == 0)
                 {
                     float lnX = _llx - LineNumberSettings.Distance;
-                    // 行号通常右对齐到距离位置？Word是右对齐到 margin - distance。
-                    // 简单实现：左对齐或右对齐
-                    // 这里假设 LineNumberSettings.Distance 是距离正文的间距
-                    // 那么行号应该画在 _llx - Distance - (行号宽度) 
-                    // 简化：画在 _llx - Distance 处，右对齐
-                    
                     _canvas.SaveState();
                     _canvas.BeginText();
-                    // 使用 Helvetica 作为行号字体，确保可用性
                     var lineNumberFontName = FontFactory.IsRegistered("Helvetica") ? "Helvetica" : "F1";
                     _canvas.SetFontAndSize(lineNumberFontName, para.Font.Size);
-                    
                     var lnText = CurrentLineNumber.ToString();
-                    // 简单估算宽度
                     float lnWidth = lnText.Length * para.Font.Size * 0.5f; 
-                    
                     _canvas.SetTextMatrix(1, 0, 0, 1, lnX - lnWidth, yLine - para.Font.Size * 0.8f);
                     _canvas.ShowText(lnText);
                     _canvas.EndText();
@@ -428,7 +462,12 @@ public class ColumnText
         return y - para.SpacingAfter;
     }
 
-    private static List<Chunk> SplitChunkByWords(Chunk chunk)
+    /// <summary>
+    /// Split a chunk into smaller chunks that each fit within <paramref name="maxLen"/>
+    /// when measured in the given direction.  Words are preferred split points but
+    /// if a word itself is too long it will be broken at character boundaries.
+    /// </summary>
+    private static List<Chunk> SplitChunk(Chunk chunk, float maxLen, TextDirection direction)
     {
         var result = new List<Chunk>();
         if (string.IsNullOrEmpty(chunk.Content))
@@ -437,25 +476,50 @@ public class ColumnText
             return result;
         }
 
+        // break on spaces, but preserve them in the token so justification can space them
         var words = chunk.Content.Split(new[] { ' ' }, StringSplitOptions.None);
         for (int i = 0; i < words.Length; i++)
         {
             string w = words[i];
             if (i < words.Length - 1)
                 w += " ";
-                
-            if (!string.IsNullOrEmpty(w))
+
+            while (w.Length > 0)
             {
-                var newChunk = new Chunk(w, chunk.Font)
+                var test = new Chunk(w, chunk.Font)
                 {
                     BackgroundColor = chunk.BackgroundColor,
                     TextRise = chunk.TextRise,
                     Anchor = chunk.Anchor,
                     HasUnderline = chunk.HasUnderline,
                     UnderlineThickness = chunk.UnderlineThickness,
-                    UnderlineYPosition = chunk.UnderlineYPosition
+                    UnderlineYPosition = chunk.UnderlineYPosition,
+                    DirectionOverride = chunk.DirectionOverride
                 };
-                result.Add(newChunk);
+                float len = test.GetAdvance(direction);
+                if (maxLen > 0 && len > maxLen && w.Length > 1)
+                {
+                    // split off first character
+                    var first = w.Substring(0, 1);
+                    var ch = new Chunk(first, chunk.Font)
+                    {
+                        BackgroundColor = chunk.BackgroundColor,
+                        TextRise = chunk.TextRise,
+                        Anchor = chunk.Anchor,
+                        HasUnderline = chunk.HasUnderline,
+                        UnderlineThickness = chunk.UnderlineThickness,
+                        UnderlineYPosition = chunk.UnderlineYPosition,
+                        DirectionOverride = chunk.DirectionOverride
+                    };
+                    result.Add(ch);
+                    w = w.Substring(1);
+                }
+                else
+                {
+                    // w fits as-is
+                    result.Add(test);
+                    w = "";
+                }
             }
         }
         return result;
@@ -487,31 +551,27 @@ public class ColumnText
         float currentLineLength = 0;
         bool firstChunkOnLine = true;
 
-        foreach (var chunk in para.Chunks)
+        for (int ci = 0; ci < para.Chunks.Count; ci++)
         {
-            // 竖排字符高度：
-            // CJK: 字号
-            // Latin: 旋转后宽度 -> 字号
-            // 简单假设所有字符高度 = font.Size
-            // 如果内容包含字符串，需要逐字符计算高度
-            // 这里简化：Chunk.GetWidth() 返回的是水平宽度。对于等宽中文字体，宽度=高度。
-            // 对于非等宽字体，高度通常是固定的（字号）。
-            // 我们假设 chunk 的“竖向长度”等于 chunk.Content.Length * chunk.Font.Size (简单估算)
-            // 或者更准确：调用 GetWidthPoint() 但假设它是竖向的？
-            // 更好的方法：RenderChunkVertical 负责绘制。这里只负责分行。
-            // 假设每个字符高度 = Font.Size。
-            
-            float chunkHeight = 0;
-            if (!string.IsNullOrEmpty(chunk.Content))
-            {
-                // 简单估算：每个字符高度 = Font.Size
-                // 实际应区分半角全角
-                // 这里暂时用 GetWidth() 近似，因为 CJK 宽度=高度。
-                chunkHeight = chunk.GetWidth(); 
-            }
+            var chunk = para.Chunks[ci];
+            var effectiveDir = chunk.DirectionOverride ?? TextDirection;
+            float chunkLen = chunk.GetAdvance(TextDirection.Vertical);
+            float availForThis = firstChunkOnLine ? availableHeight : availableHeight - currentLineLength;
 
-            if (!firstChunkOnLine && currentLineLength + chunkHeight > availableHeight && currentLine.Count > 0)
+            if (!firstChunkOnLine && currentLineLength + chunkLen > availableHeight && currentLine.Count > 0)
             {
+                // try splitting the chunk so part fits
+                var subs = SplitChunk(chunk, availForThis, TextDirection.Vertical);
+                if (subs.Count > 1)
+                {
+                    // replace current chunk with parts and restart processing from same index
+                    para.Chunks.RemoveAt(ci);
+                    para.Chunks.InsertRange(ci, subs);
+                    // decrement ci so next iteration processes first new subchunk
+                    ci--;
+                    continue;
+                }
+
                 lines.Add((currentLine, currentLineLength));
                 currentLine = new List<Chunk>();
                 currentLineLength = 0;
@@ -519,7 +579,7 @@ public class ColumnText
             }
 
             currentLine.Add(chunk);
-            currentLineLength += chunkHeight;
+            currentLineLength += chunkLen;
             firstChunkOnLine = false;
         }
         if (currentLine.Count > 0)
@@ -529,10 +589,11 @@ public class ColumnText
 
         // 渲染每一行
         bool firstLine = true;
-        foreach (var (chunks, lineLen) in lines)
+        for (int li = 0; li < lines.Count; li++)
         {
+            var (chunks, lineLen) = lines[li];
+            bool isLastLine = li == lines.Count - 1;
             // 计算当前行的起始 Y (Top)
-            // IndentationLeft -> Top Indent
             float startY = topY - para.IndentationLeft;
             if (firstLine)
             {
@@ -551,16 +612,20 @@ public class ColumnText
             }
 
             var currentY = startY;
-            
-            // 绘制当前行字符
-            // 字符中心 X 对齐到 rightX - lineWidth/2 ? 
-            // 或者 rightX 是行的右边界。字符画在 rightX - lineWidth 到 rightX 之间。
-            // 字符中心 X = rightX - lineWidth / 2。
-            // 简化：字符画在 rightX - Font.Size (假设 lineWidth ~ Font.Size)
-            
+
+            // justification: spread extra vertical space between chunks
+            float extraGap = 0;
+            if (para.Alignment == Element.ALIGN_JUSTIFIED && !isLastLine && chunks.Count > 1)
+            {
+                extraGap = (availableHeight - lineLen) / (chunks.Count - 1);
+                if (extraGap < 0) extraGap = 0;
+            }
+
             foreach (var chunk in chunks)
             {
                 currentY = RenderChunkVertical(chunk, rightX, currentY, simulate);
+                if (extraGap != 0)
+                    currentY -= extraGap; // move down additional
             }
 
             // 绘制行号 (竖排时绘制在上方)
@@ -601,6 +666,7 @@ public class ColumnText
         }
 
         var x = startInline;
+        var effectiveDir = chunk.DirectionOverride ?? TextDirection;
         var y = startBlock;
 
         if (string.IsNullOrEmpty(chunk.Content)) return y;
@@ -612,12 +678,14 @@ public class ColumnText
             if (chunk.BackgroundColor != null)
             {
                 _canvas.SetColorFill(chunk.BackgroundColor);
-                _canvas.Rectangle(x, y - chunk.Font.Size * 0.2f, chunk.GetWidth(), chunk.Font.Size * 1.2f);
+                float w = (effectiveDir == TextDirection.Vertical ? chunk.GetAdvance(effectiveDir) : chunk.GetWidth());
+                _canvas.Rectangle(x, y - chunk.Font.Size * 0.2f, w, chunk.Font.Size * 1.2f);
                 _canvas.Fill();
             }
 
             _canvas.SetColorFill(chunk.Font.Color);
             var textBaselineY = y - chunk.Font.Size * 0.8f + chunk.TextRise;
+        }
 
             _canvas.BeginText();
             // 使用 chunk 的字体族，确保在 PDF 中已注册
