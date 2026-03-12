@@ -9,6 +9,11 @@ public class ColumnText
 {
     private readonly PdfContentByte _canvas;
     private readonly List<IElement> _elements = [];
+
+    /// <summary>
+    /// Public view of the pending element queue (used by unit tests).
+    /// </summary>
+    public IReadOnlyList<IElement> Elements => _elements.AsReadOnly();
     private float _llx, _lly, _urx, _ury;
     private float _yLine;
     private int _currentPageNumber = 1;
@@ -101,6 +106,39 @@ public class ColumnText
                 if (boundaryHit)
                 {
                     // element does not fit in current column/page
+                    // attempt to split paragraph across the boundary
+                    if (element is Paragraph para)
+                    {
+                        // calculate how much vertical space is left
+                        float availHeight = TextDirection == TextDirection.Vertical
+                            ? _yLine - _llx
+                            : _yLine - _lly;
+                        float availLength = TextDirection == TextDirection.Vertical
+                            ? _ury - _lly
+                            : _urx - _llx;
+
+                        var (first, rest) = SplitParagraphByHeight(para, availLength, availHeight);
+                        if (first != null && rest != null)
+                        {
+                            // render the portion that fits
+                            if (!simulate)
+                            {
+                                if (TextDirection == TextDirection.Vertical)
+                                    _yLine = RenderElement(first, _ury, _yLine, _lly);
+                                else
+                                    _yLine = RenderElement(first, _llx, _yLine, _urx);
+                            }
+                            else
+                            {
+                                _yLine -= EstimateHeight(first, availLength);
+                            }
+                            remaining.Add(rest);
+                            hasMoreText = true;
+                            continue;
+                        }
+                        // if no sub‑paragraph fit, fall through and treat as whole element
+                    }
+
                     remaining.Add(element);
                     hasMoreText = true;
                     continue;
@@ -838,6 +876,61 @@ public class ColumnText
     {
         // 直接使用 simulate = true 来精确计算耗费高度
         return -RenderElement(element, 0, 0, width, simulate: true);
+    }
+
+    /// <summary>
+    /// Try to split a paragraph so that the first part fits in the given vertical
+    /// <paramref name="availableHeight"/>.  The <paramref name="availableLength"/>
+    /// parameter is the inline dimension (width for horizontal text, height for
+    /// vertical).  Returns a tuple of (firstPart, remainder).  If splitting is not
+    /// possible (nothing fits or paragraph already fits) the tuple elements will be
+    /// null appropriately.
+    /// </summary>
+    private (Paragraph? first, Paragraph? remainder) SplitParagraphByHeight(Paragraph para, float availableLength, float availableHeight)
+    {
+        var chunks = para.Chunks;
+        if (chunks.Count == 0)
+            return (null, null);
+
+        int fitCount = 0;
+        for (int i = 1; i <= chunks.Count; i++)
+        {
+            var testPara = new Paragraph(para)
+            {
+                Chunks = chunks.Take(i).ToList()
+            };
+            float height = EstimateHeight(testPara, availableLength);
+            if (height <= availableHeight + 0.1f)
+            {
+                fitCount = i;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (fitCount == 0)
+        {
+            // not even a single chunk fits
+            return (null, para);
+        }
+
+        if (fitCount >= chunks.Count)
+        {
+            // whole paragraph fits
+            return (para, null);
+        }
+
+        var firstPara = new Paragraph(para)
+        {
+            Chunks = chunks.Take(fitCount).ToList()
+        };
+        var restPara = new Paragraph(para)
+        {
+            Chunks = chunks.Skip(fitCount).ToList()
+        };
+        return (firstPara, restPara);
     }
 
     public static bool HasMoreText(int status) => status == NO_MORE_COLUMN;

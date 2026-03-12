@@ -235,6 +235,61 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             var stream = cb.ToString();
             Assert.Contains("1.000 0.000 0.000 1.000", stream);
         }
+
+        [Fact]
+        public void ColumnText_ParagraphSplitsAcrossPages()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Horizontal };
+            // narrow column height to force a split
+            ct.SetSimpleColumn(0, 0, 200, 60);
+
+            var para = new Paragraph("", Font.Helvetica(12));
+            // add a bunch of text chunks so height exceeds 60
+            for (int i = 0; i < 10; i++)
+            {
+                para.Add(new Chunk("word ", Font.Helvetica(12)));
+            }
+            ct.AddElement(para);
+
+            // simulate first page
+            int status1 = ct.Go(false);
+            Assert.Equal(ColumnText.NO_MORE_COLUMN, status1);
+            Assert.Single(ct.Elements);
+            var remainder = ct.Elements[0] as Paragraph;
+            Assert.NotNull(remainder);
+            Assert.True(remainder.Chunks.Count < para.Chunks.Count);
+
+            // second page should consume remaining text
+            int status2 = ct.Go(false);
+            Assert.Equal(ColumnText.NO_MORE_TEXT, status2);
+        }
+
+        [Fact]
+        public void ColumnText_ParagraphSplitsVertically()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb) { TextDirection = TextDirection.Vertical };
+            // limit horizontal space so only part of paragraph fits to the right
+            ct.SetSimpleColumn(0, 0, 60, 200);
+
+            var para = new Paragraph("", Font.Helvetica(12));
+            for (int i = 0; i < 10; i++)
+            {
+                para.Add(new Chunk("word ", Font.Helvetica(12)));
+            }
+            ct.AddElement(para);
+
+            int status1 = ct.Go(false);
+            Assert.Equal(ColumnText.NO_MORE_COLUMN, status1);
+            Assert.Single(ct.Elements);
+            var remainder = ct.Elements[0] as Paragraph;
+            Assert.NotNull(remainder);
+            Assert.True(remainder.Chunks.Count < para.Chunks.Count);
+
+            int status2 = ct.Go(false);
+            Assert.Equal(ColumnText.NO_MORE_TEXT, status2);
+        }
     }
     }
 
