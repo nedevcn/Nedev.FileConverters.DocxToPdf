@@ -111,6 +111,12 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             Assert.Equal(400f, sz2.Width);
             Assert.Equal(500f, sz2.Height);
 
+            // ensure offsets list populated
+            var field = typeof(PdfReader).GetField("_streamOffsets", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var offs = field.GetValue(reader) as System.Collections.IList;
+            Assert.NotNull(offs);
+            Assert.Equal(2, offs.Count);
+
             var page1 = System.Text.Encoding.ASCII.GetString(reader.GetPageContent(1));
             var page2 = System.Text.Encoding.ASCII.GetString(reader.GetPageContent(2));
             Assert.Contains("AAA", page1);

@@ -7,6 +7,9 @@ public class PdfReader : IDisposable
 {
     private readonly byte[] _pdfData;
     private readonly List<Rectangle> _pageSizes = [];
+    // offsets/lengths of page content streams (one per page, in order)
+    private readonly List<int> _streamOffsets = [];
+    private readonly List<int> _streamLengths = [];
 
     public int NumberOfPages => _pageSizes.Count;
 
@@ -38,6 +41,22 @@ public class PdfReader : IDisposable
             for (int i = 0; i < count; i++)
             {
                 _pageSizes.Add(Rectangle.A4);
+            }
+
+            // record stream offsets/lengths by scanning for content pairs
+            var streamRegex = new System.Text.RegularExpressions.Regex(@"stream\r?\n",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+            var endRegex = new System.Text.RegularExpressions.Regex(@"endstream",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+            var streamMatches = streamRegex.Matches(text);
+            var endMatches = endRegex.Matches(text);
+            int pagesFound = Math.Min(streamMatches.Count, endMatches.Count);
+            for (int si = 0; si < pagesFound; si++)
+            {
+                int start = streamMatches[si].Index + streamMatches[si].Length;
+                int end = endMatches[si].Index;
+                _streamOffsets.Add(start);
+                _streamLengths.Add(end - start);
             }
 
             // look for media boxes to override defaults
@@ -75,33 +94,21 @@ public class PdfReader : IDisposable
 
     public byte[] GetPageContent(int pageNum)
     {
-        // attempt to return only the content stream for the requested page
-        if (pageNum < 1 || pageNum > _pageSizes.Count)
+        if (pageNum < 1 || pageNum > _streamOffsets.Count)
             return _pdfData;
 
         try
         {
-            var text = System.Text.Encoding.ASCII.GetString(_pdfData);
-            var streamMatches = System.Text.RegularExpressions.Regex.Matches(text, @"stream\r?\n");
-            if (pageNum <= streamMatches.Count)
-            {
-                int start = streamMatches[pageNum - 1].Index + streamMatches[pageNum - 1].Length;
-                var substr = text.Substring(start);
-                var endMatch = System.Text.RegularExpressions.Regex.Match(substr, "endstream");
-                if (endMatch.Success)
-                {
-                    var pageText = substr.Substring(0, endMatch.Index);
-                    return System.Text.Encoding.ASCII.GetBytes(pageText);
-                }
-            }
+            int start = _streamOffsets[pageNum - 1];
+            int len = _streamLengths[pageNum - 1];
+            var result = new byte[len];
+            Array.Copy(_pdfData, start, result, 0, len);
+            return result;
         }
         catch
         {
-            // fall through to returning full PDF
+            return _pdfData;
         }
-        return _pdfData;
-    }
-
     public void Dispose()
     {
         // ????
