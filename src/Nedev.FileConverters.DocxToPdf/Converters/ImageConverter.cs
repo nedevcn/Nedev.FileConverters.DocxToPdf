@@ -61,8 +61,9 @@ public class ImageConverter
     private readonly ConvertOptions _options;
     private readonly OpenXmlElement? _colorScheme;
     private readonly DrawingRasterizer _drawingRasterizer;
+    private readonly DrawingMLConverter _drawingMLConverter;
 
-    public ImageConverter(WordprocessingDocument document, ConvertOptions options)
+    public ImageConverter(WordprocessingDocument document, ConvertOptions options, FontHelper? fontHelper = null)
     {
         _document = document;
         _options = options;
@@ -71,6 +72,7 @@ public class ImageConverter
         var themePart = _document.MainDocumentPart?.ThemePart;
         _colorScheme = themePart?.Theme?.ThemeElements?.ColorScheme;
         _drawingRasterizer = new DrawingRasterizer(_document, _options);
+        _drawingMLConverter = new DrawingMLConverter(_document, fontHelper ?? new FontHelper(options, _colorScheme));
     }
 
     /// <summary>
@@ -220,6 +222,13 @@ public class ImageConverter
     /// </summary>
     private IElement? ExtractImageFromDrawing(DocumentFormat.OpenXml.Wordprocessing.Drawing drawing, float pageWidth)
     {
+        // 首先尝试使用 DrawingMLConverter 处理 DrawingML 内容
+        var drawingMLResult = _drawingMLConverter.ConvertDrawing(drawing, pageWidth);
+        if (drawingMLResult != null)
+        {
+            return drawingMLResult;
+        }
+
         // ????
         var inline = drawing.Inline;
         if (inline != null)
