@@ -75,7 +75,30 @@ public class PdfReader : IDisposable
 
     public byte[] GetPageContent(int pageNum)
     {
-        // ????:??????
+        // attempt to return only the content stream for the requested page
+        if (pageNum < 1 || pageNum > _pageSizes.Count)
+            return _pdfData;
+
+        try
+        {
+            var text = System.Text.Encoding.ASCII.GetString(_pdfData);
+            var streamMatches = System.Text.RegularExpressions.Regex.Matches(text, @"stream\r?\n");
+            if (pageNum <= streamMatches.Count)
+            {
+                int start = streamMatches[pageNum - 1].Index + streamMatches[pageNum - 1].Length;
+                var substr = text.Substring(start);
+                var endMatch = System.Text.RegularExpressions.Regex.Match(substr, "endstream");
+                if (endMatch.Success)
+                {
+                    var pageText = substr.Substring(0, endMatch.Index);
+                    return System.Text.Encoding.ASCII.GetBytes(pageText);
+                }
+            }
+        }
+        catch
+        {
+            // fall through to returning full PDF
+        }
         return _pdfData;
     }
 

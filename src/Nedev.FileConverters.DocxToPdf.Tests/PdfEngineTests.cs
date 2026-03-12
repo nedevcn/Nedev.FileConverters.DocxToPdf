@@ -100,7 +100,7 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         public void PdfReader_ParsesMediaBoxSizes()
         {
             // create fake pdf data containing two media boxes
-            var fake = System.Text.Encoding.ASCII.GetBytes("%PDF-1.4\n/MediaBox [0 0 200 300]\n1 0 obj<< /Type /Page >>endobj\n/MediaBox [0 0 400 500]\n2 0 obj<< /Type /Page >>endobj");
+            var fake = System.Text.Encoding.ASCII.GetBytes("%PDF-1.4\n/MediaBox [0 0 200 300]\n1 0 obj<< /Type /Page >>stream\nAAA\nendstream\nendobj\n/MediaBox [0 0 400 500]\n2 0 obj<< /Type /Page >>stream\nBBB\nendstream\nendobj");
             using var ms = new MemoryStream(fake);
             var reader = new PdfReader(ms);
             Assert.Equal(2, reader.NumberOfPages);
@@ -110,6 +110,11 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             Assert.Equal(300f, sz1.Height);
             Assert.Equal(400f, sz2.Width);
             Assert.Equal(500f, sz2.Height);
+
+            var page1 = System.Text.Encoding.ASCII.GetString(reader.GetPageContent(1));
+            var page2 = System.Text.Encoding.ASCII.GetString(reader.GetPageContent(2));
+            Assert.Contains("AAA", page1);
+            Assert.Contains("BBB", page2);
         }
 
         [Fact]
