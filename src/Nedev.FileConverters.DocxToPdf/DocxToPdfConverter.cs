@@ -857,11 +857,17 @@ public class DocxToPdfConverter : IFileConverter
                 // SYMBOL 字段支持 - 插入特殊字符
                 return ParseSymbolField(instruction);
                 
-            case "SHAPEDOG":
             case "DOCVARIABLE":
+                // DOCVARIABLE 字段支持 - 文档变量
+                return ParseDocVariableField(instruction, docxDocument);
+                
+            case "SHAPEDOG":
+                // SHAPEDOG 字段支持 - 形状锚点信息
+                return ParseShapedogField(instruction);
+                
             case "LISTNUM":
-                // 这些字段暂时不支持
-                return null;
+                // LISTNUM 字段支持 - 列表编号
+                return ParseListnumField(instruction);
                 
             case "EQ":
                 // EQ (Equation) 字段支持
@@ -972,6 +978,79 @@ public class DocxToPdfConverter : IFileConverter
         }
         
         return result.Length > 0 ? result.ToString() : "";
+    }
+
+    /// <summary>
+    /// 解析 DOCVARIABLE 字段 - 文档变量
+    /// 格式: DOCVARIABLE variableName
+    /// 从文档的 CustomXmlParts 或 DocumentSettingsPart 中查找变量值
+    /// </summary>
+    private string? ParseDocVariableField(string instruction, WordprocessingDocument docxDocument)
+    {
+        if (string.IsNullOrWhiteSpace(instruction))
+            return null;
+
+        // 提取变量名
+        var match = System.Text.RegularExpressions.Regex.Match(instruction, @"DOCVARIABLE\s+(\w+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+
+        var variableName = match.Groups[1].Value;
+
+        try
+        {
+            // 尝试从 DocumentSettingsPart 的 DocumentVariables 中查找
+            var settingsPart = docxDocument.MainDocumentPart?.DocumentSettingsPart;
+            if (settingsPart?.Settings != null)
+            {
+                var docVars = settingsPart.Settings.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.DocumentVariables>();
+                if (docVars != null)
+                {
+                    var docVar = docVars.Elements<DocumentFormat.OpenXml.Wordprocessing.DocumentVariable>()
+                        .FirstOrDefault(v => v.Name?.Value?.Equals(variableName, StringComparison.OrdinalIgnoreCase) == true);
+                    
+                    if (docVar?.Val?.Value != null)
+                    {
+                        return docVar.Val.Value;
+                    }
+                }
+            }
+
+            // 尝试从 CustomXmlParts 中查找（某些文档存储在这里）
+            var customXmlParts = docxDocument.MainDocumentPart?.CustomXmlParts;
+            if (customXmlParts != null)
+            {
+                foreach (var part in customXmlParts)
+                {
+                    try
+                    {
+                        using var stream = part.GetStream();
+                        using var reader = new System.IO.StreamReader(stream);
+                        var xmlContent = reader.ReadToEnd();
+                        
+                        // 简单查找变量名和值
+                        var varPattern = $"<{variableName}>([^<]+)</{variableName}>";
+                        var varMatch = System.Text.RegularExpressions.Regex.Match(xmlContent, varPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (varMatch.Success)
+                        {
+                            return varMatch.Groups[1].Value;
+                        }
+                    }
+                    catch
+                    {
+                        // 忽略读取错误，继续尝试其他部分
+                    }
+                }
+            }
+
+            // 如果找不到变量，返回占位符
+            return $"«{variableName}»";
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DocxToPdfConverter] Failed to parse DOCVARIABLE field: {ex.Message}");
+            return $"«{variableName}»";
+        }
     }
 
     /// <summary>
