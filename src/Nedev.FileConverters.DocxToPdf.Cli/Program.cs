@@ -1,4 +1,4 @@
-﻿using Nedev.FileConverters.DocxToPdf;
+using Nedev.FileConverters.DocxToPdf;
 using Nedev.FileConverters;
 
 // simple CLI wrapper for the DocxToPdfConverter / core infrastructure
@@ -15,6 +15,37 @@ if (argsList.Length < 2)
 
 var inputPath = argsList[0];
 var outputPath = argsList[1];
+
+// Validate input file exists
+if (!File.Exists(inputPath))
+{
+    Console.Error.WriteLine($"Error: Input file not found: '{inputPath}'");
+    Environment.Exit(1);
+    return;
+}
+
+// Validate input file extension
+if (!inputPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase) &&
+    !inputPath.EndsWith(".doc", StringComparison.OrdinalIgnoreCase))
+{
+    Console.Error.WriteLine($"Warning: Input file does not have a .docx or .doc extension: '{inputPath}'");
+}
+
+// Ensure output directory exists
+var outputDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
+{
+    try
+    {
+        Directory.CreateDirectory(outputDir);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Error: Failed to create output directory '{outputDir}': {ex.Message}");
+        Environment.Exit(1);
+        return;
+    }
+}
 
 try
 {

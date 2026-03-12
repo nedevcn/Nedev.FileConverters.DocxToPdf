@@ -5,7 +5,7 @@ namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 /// </summary>
 public class ListItem : Paragraph
 {
-    public Chunk ListSymbol { get; set; } = new("•", Font.Helvetica(12));
+    public Chunk ListSymbol { get; set; } = new("ï¿½", Font.Helvetica(12));
 
     public ListItem(string? text = null, Font? font = null) : base(text, font) { }
 }
@@ -29,7 +29,7 @@ public class List : IElement
     public float SymbolIndent { get; set; } = 15f;
     public bool Autoindent { get; set; } = true;
 
-    public Chunk ListSymbol { get; set; } = new("•", Font.Helvetica(12));
+    public Chunk ListSymbol { get; set; } = new("ï¿½", Font.Helvetica(12));
 
     private readonly List<ListItem> _items = [];
 
@@ -44,10 +44,10 @@ public class List : IElement
         ListSymbol = ListType switch
         {
             ORDERED => new Chunk("1.", Font.Helvetica(12)),
-            UNORDERED => new Chunk("•", Font.Helvetica(12)),
+            UNORDERED => new Chunk("ï¿½", Font.Helvetica(12)),
             ALPHABETICAL => new Chunk("a.", Font.Helvetica(12)),
             ROMAN => new Chunk("i.", Font.Helvetica(12)),
-            _ => new Chunk("•", Font.Helvetica(12))
+            _ => new Chunk("ï¿½", Font.Helvetica(12))
         };
     }
 

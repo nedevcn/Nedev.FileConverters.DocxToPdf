@@ -1,4 +1,4 @@
-﻿using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.Helpers;
@@ -594,8 +594,9 @@ public class ImageConverter
             if (!isAnchor) image.Alignment = Element.ALIGN_CENTER;
             return image;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[ImageConverter] Failed to create image from embedId '{embedId}': {ex.Message}");
             return null;
         }
     }
@@ -678,8 +679,9 @@ public class ImageConverter
             using var data = image.Encode(SKEncodedImageFormat.Png, 100);
             return data.ToArray();
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[ImageConverter] BakeDuotone processing failed: {ex.Message}");
             return null;
         }
     }
@@ -881,9 +883,9 @@ public class ImageConverter
                 return data.ToArray();
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // ????,????
+            Console.Error.WriteLine($"[ImageConverter] Image compression failed: {ex.Message}");
             return imageBytes;
         }
     }

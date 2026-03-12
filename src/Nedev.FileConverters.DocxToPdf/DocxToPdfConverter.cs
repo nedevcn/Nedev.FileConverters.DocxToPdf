@@ -853,10 +853,13 @@ public class DocxToPdfConverter : IFileConverter
                 // 宏按钮，显示按钮文本
                 return ParseMacroButtonField(instruction);
                 
+            case "SYMBOL":
+                // SYMBOL 字段支持 - 插入特殊字符
+                return ParseSymbolField(instruction);
+                
             case "SHAPEDOG":
             case "DOCVARIABLE":
             case "LISTNUM":
-            case "SYMBOL":
                 // 这些字段暂时不支持
                 return null;
                 
@@ -970,7 +973,63 @@ public class DocxToPdfConverter : IFileConverter
         
         return result.Length > 0 ? result.ToString() : "";
     }
-    
+
+    /// <summary>
+    /// 解析 SYMBOL 字段 - 插入特殊字符
+    /// 格式: SYMBOL charNum [\s fontName] [\h] [\f fontNum]
+    /// 示例: SYMBOL 97 \f "Symbol" -> 'a'
+    /// </summary>
+    private static string? ParseSymbolField(string instruction)
+    {
+        if (string.IsNullOrWhiteSpace(instruction))
+            return null;
+
+        // 提取字符编号（十进制或十六进制）
+        var match = System.Text.RegularExpressions.Regex.Match(instruction, @"SYMBOL\s+(\d+|0x[0-9A-Fa-f]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+
+        var charCodeStr = match.Groups[1].Value;
+        int charCode;
+
+        if (charCodeStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!int.TryParse(charCodeStr.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out charCode))
+                return null;
+        }
+        else
+        {
+            if (!int.TryParse(charCodeStr, out charCode))
+                return null;
+        }
+
+        // 检查是否为有效的 Unicode 字符
+        if (charCode < 0 || charCode > 0x10FFFF)
+            return null;
+
+        try
+        {
+            // 尝试将字符代码转换为字符串
+            if (charCode <= 0xFFFF)
+            {
+                // 基本多文种平面 (BMP)
+                return ((char)charCode).ToString();
+            }
+            else
+            {
+                // 辅助平面字符 - 使用代理对
+                charCode -= 0x10000;
+                var highSurrogate = (char)(0xD800 + (charCode >> 10));
+                var lowSurrogate = (char)(0xDC00 + (charCode & 0x3FF));
+                return new string(new[] { highSurrogate, lowSurrogate });
+            }
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// 解析 REF 字段（交叉引用）
     /// </summary>
@@ -1145,10 +1204,17 @@ public class DocxToPdfConverter : IFileConverter
     /// </summary>
     private string? GetCustomProperty(WordprocessingDocument docxDocument, string propertyName)
     {
+        if (docxDocument == null)
+            throw new ArgumentNullException(nameof(docxDocument));
+        if (string.IsNullOrWhiteSpace(propertyName))
+            return null;
+
         try
         {
             // 使用更简单的方式：直接从文档的内置属性和扩展属性查找
             var props = docxDocument.PackageProperties;
+            if (props == null)
+                return null;
             
             // 尝试通过扩展属性查找（如果存在）
             // 注意：OpenXML SDK 的 CustomProperties 支持有限，这里使用备用方案
@@ -1158,8 +1224,8 @@ public class DocxToPdfConverter : IFileConverter
         }
         catch (Exception ex)
         {
-            // 记录异常但不抛出（可选：添加日志）
-            System.Diagnostics.Debug.WriteLine($"读取自定义属性失败：{ex.Message}");
+            // 记录异常但不抛出，确保转换流程继续
+            Console.Error.WriteLine($"[DocxToPdfConverter] Failed to read custom property '{propertyName}': {ex.Message}");
         }
         
         return null;
@@ -1184,6 +1250,11 @@ public class DocxToPdfConverter : IFileConverter
     /// </summary>
     public static void ConvertFile(string docxPath, string pdfPath, ConvertOptions? options = null)
     {
+        if (string.IsNullOrWhiteSpace(docxPath))
+            throw new ArgumentException("DOCX file path cannot be null or empty.", nameof(docxPath));
+        if (string.IsNullOrWhiteSpace(pdfPath))
+            throw new ArgumentException("PDF file path cannot be null or empty.", nameof(pdfPath));
+
         var converter = new DocxToPdfConverter(options ?? ConvertOptions.Default);
         converter.Convert(docxPath, pdfPath);
     }
@@ -1193,6 +1264,11 @@ public class DocxToPdfConverter : IFileConverter
     /// </summary>
     public static void ConvertStream(Stream docxStream, Stream pdfStream, ConvertOptions? options = null)
     {
+        if (docxStream == null)
+            throw new ArgumentNullException(nameof(docxStream));
+        if (pdfStream == null)
+            throw new ArgumentNullException(nameof(pdfStream));
+
         var converter = new DocxToPdfConverter(options ?? ConvertOptions.Default);
         converter.Convert(docxStream, pdfStream);
     }
@@ -1202,6 +1278,9 @@ public class DocxToPdfConverter : IFileConverter
     /// </summary>
     public static byte[] ConvertBytes(byte[] docxBytes, ConvertOptions? options = null)
     {
+        if (docxBytes == null || docxBytes.Length == 0)
+            throw new ArgumentException("DOCX bytes cannot be null or empty.", nameof(docxBytes));
+
         var converter = new DocxToPdfConverter(options ?? ConvertOptions.Default);
         return converter.Convert(docxBytes);
     }

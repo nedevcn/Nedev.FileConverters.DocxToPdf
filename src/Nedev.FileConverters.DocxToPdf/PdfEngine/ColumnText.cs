@@ -352,7 +352,9 @@ public class ColumnText
                     
                     _canvas.SaveState();
                     _canvas.BeginText();
-                    _canvas.SetFontAndSize("F1", para.Font.Size); // 使用段落字体大小? 还是固定? Word通常使用"行号"样式。这里简化用段落字号。
+                    // 使用 Helvetica 作为行号字体，确保可用性
+                    var lineNumberFontName = FontFactory.IsRegistered("Helvetica") ? "Helvetica" : "F1";
+                    _canvas.SetFontAndSize(lineNumberFontName, para.Font.Size);
                     
                     var lnText = CurrentLineNumber.ToString();
                     // 简单估算宽度
@@ -523,7 +525,9 @@ public class ColumnText
                     float lnY = topY + LineNumberSettings.Distance + para.Font.Size;
                     _canvas.SaveState();
                     _canvas.BeginText();
-                    _canvas.SetFontAndSize("F1", para.Font.Size);
+                    // 使用 Helvetica 作为行号字体，确保可用性
+                    var lineNumberFontName = FontFactory.IsRegistered("Helvetica") ? "Helvetica" : "F1";
+                    _canvas.SetFontAndSize(lineNumberFontName, para.Font.Size);
                     
                     var lnText = CurrentLineNumber.ToString();
                     float lnWidth = lnText.Length * para.Font.Size * 0.5f; 
@@ -570,7 +574,9 @@ public class ColumnText
             var textBaselineY = y - chunk.Font.Size * 0.8f + chunk.TextRise;
 
             _canvas.BeginText();
-            _canvas.SetFontAndSize("F1", chunk.Font.Size);
+            // 使用 chunk 的字体族，确保在 PDF 中已注册
+            var fontName = FontFactory.IsRegistered(chunk.Font.Family) ? chunk.Font.Family : "F1";
+            _canvas.SetFontAndSize(fontName, chunk.Font.Size);
             _canvas.SetTextMatrix(1, 0, 0, 1, x, textBaselineY);
             _canvas.ShowText(chunk.Content);
             _canvas.EndText();
@@ -619,7 +625,9 @@ public class ColumnText
             {
                 _canvas.SaveState();
                 _canvas.BeginText();
-                _canvas.SetFontAndSize("F1", chunk.Font.Size);
+                // 使用 chunk 的字体族，确保在 PDF 中已注册
+                var fontName = FontFactory.IsRegistered(chunk.Font.Family) ? chunk.Font.Family : "F1";
+                _canvas.SetFontAndSize(fontName, chunk.Font.Size);
                 
                 // 判断是否需要旋转
                 // CJK: 保持正向

@@ -73,7 +73,7 @@ public static class FootnoteEndnoteEnhancer
                 Id = id,
                 Number = number,
                 IsFootnote = false,
-                ReferenceMark = "¹"
+                ReferenceMark = "ï¿½"
             };
 
             // ????

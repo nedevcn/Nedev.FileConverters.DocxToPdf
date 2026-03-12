@@ -11,6 +11,16 @@ using WParagraph = DocumentFormat.OpenXml.Wordprocessing.Paragraph;
 namespace Nedev.FileConverters.DocxToPdf.Converters;
 
 /// <summary>
+/// 字段帧 - 用于支持嵌套字段解析
+/// </summary>
+internal class FieldFrame
+{
+    public string Instruction { get; set; } = string.Empty;
+    public bool HasSeparator { get; set; }
+    public string? HyperlinkHref { get; set; }
+}
+
+/// <summary>
 /// DOCX 段落地转 PDF 段落
 /// </summary>
 public class ParagraphConverter
@@ -218,10 +228,8 @@ public class ParagraphConverter
         // 以便 AppendInline 在生成 Chunk 时添加 anchor 属性。
         string? currentFieldHref = null;
 
-        // 复杂字段解析状态
-        string? currentComplexInstr = null;
-        bool inComplexField = false;
-        bool complexFieldHasSeparator = false;
+        // 复杂字段解析状态 - 支持嵌套字段
+        var fieldStack = new Stack<FieldFrame>();
 
         var hasContent = false;
 
@@ -230,55 +238,63 @@ public class ParagraphConverter
             switch (element)
             {
                 case DocumentFormat.OpenXml.Wordprocessing.FieldChar fieldChar:
-                    // 传统复杂字段结构由 FieldChar 开始/分隔/结束
+                    // 传统复杂字段结构由 FieldChar 开始/分隔/结束 - 支持嵌套字段
                     if (fieldChar.FieldCharType != null)
                     {
                         var type = fieldChar.FieldCharType.Value;
                         if (type == FieldCharValues.Begin)
                         {
                             DebugLog.AppendLine("[Converter] FieldChar Begin encountered");
-                            inComplexField = true;
-                            complexFieldHasSeparator = false;
-                            currentComplexInstr = string.Empty;
+                            // 推入新字段帧以支持嵌套
+                            fieldStack.Push(new FieldFrame());
                         }
                         else if (type == FieldCharValues.Separate)
                         {
-                            DebugLog.AppendLine($"[Converter] FieldChar Separate encountered; instr='{currentComplexInstr}'");
-                            complexFieldHasSeparator = true;
-
-                            // 如果字段是超链接，请从解析器获取 URL 并激活锚点
-                            if (!string.IsNullOrEmpty(currentComplexInstr) &&
-                                currentComplexInstr.TrimStart().ToUpperInvariant().StartsWith("HYPERLINK"))
+                            if (fieldStack.Count > 0)
                             {
-                                currentFieldHref = FieldResolver?.Invoke(currentComplexInstr);
-                                DebugLog.AppendLine($"[Converter] Resolved hyperlink target: {currentFieldHref}");
+                                var frame = fieldStack.Peek();
+                                frame.HasSeparator = true;
+                                DebugLog.AppendLine($"[Converter] FieldChar Separate encountered; instr='{frame.Instruction}'");
+
+                                // 如果字段是超链接，请从解析器获取 URL 并激活锚点
+                                if (!string.IsNullOrEmpty(frame.Instruction) &&
+                                    frame.Instruction.TrimStart().ToUpperInvariant().StartsWith("HYPERLINK"))
+                                {
+                                    frame.HyperlinkHref = FieldResolver?.Invoke(frame.Instruction);
+                                    currentFieldHref = frame.HyperlinkHref;
+                                    DebugLog.AppendLine($"[Converter] Resolved hyperlink target: {frame.HyperlinkHref}");
+                                }
                             }
                         }
                         else if (type == FieldCharValues.End)
                         {
-                            // 当字段结束时，如果文档中没有提供显示文本（即未出现分隔符），
-                            // 则使用 ProcessComplexField 生成输出；否则内容已经由后续 Run 处理。
-                            if (!complexFieldHasSeparator && !string.IsNullOrEmpty(currentComplexInstr))
+                            // 弹出当前字段帧
+                            if (fieldStack.Count > 0)
                             {
-                                var cmd = currentComplexInstr.Trim().Split(' ', '\t')[0].ToUpperInvariant();
-                                if (cmd != "HYPERLINK")
-                                {
-                                    ProcessComplexField(currentComplexInstr, pdfParagraph, ref hasContent, isHeading, headingSize, runProps, paraRunProps, actualFontSize, forceBold);
-                                }
-                            }
+                                var frame = fieldStack.Pop();
 
-                            inComplexField = false;
-                            currentComplexInstr = null;
-                            currentFieldHref = null; // 清除链接状态
-                            complexFieldHasSeparator = false;
+                                // 当字段结束时，如果文档中没有提供显示文本（即未出现分隔符），
+                                // 则使用 ProcessComplexField 生成输出；否则内容已经由后续 Run 处理。
+                                if (!frame.HasSeparator && !string.IsNullOrEmpty(frame.Instruction))
+                                {
+                                    var cmd = frame.Instruction.Trim().Split(' ', '\t')[0].ToUpperInvariant();
+                                    if (cmd != "HYPERLINK")
+                                    {
+                                        ProcessComplexField(frame.Instruction, pdfParagraph, ref hasContent, isHeading, headingSize, runProps, paraRunProps, actualFontSize, forceBold);
+                                    }
+                                }
+
+                                // 恢复父字段的超链接状态（如果有）
+                                currentFieldHref = fieldStack.Count > 0 ? fieldStack.Peek().HyperlinkHref : null;
+                            }
                         }
                     }
                     break;
 
                 case DocumentFormat.OpenXml.Wordprocessing.FieldCode fieldCode:
-                    if (inComplexField && !complexFieldHasSeparator && fieldCode.InnerText != null)
+                    if (fieldStack.Count > 0 && !fieldStack.Peek().HasSeparator && fieldCode.InnerText != null)
                     {
-                        currentComplexInstr += fieldCode.InnerText;
+                        fieldStack.Peek().Instruction += fieldCode.InnerText;
                     }
                     break;
 
@@ -316,7 +332,7 @@ public class ParagraphConverter
                     }
 
                     // 如果当前正在处理复杂字段的指令部分，则忽略剩余内容
-                    if (inComplexField && !complexFieldHasSeparator)
+                    if (fieldStack.Count > 0 && !fieldStack.Peek().HasSeparator)
                     {
                         break;
                     }
