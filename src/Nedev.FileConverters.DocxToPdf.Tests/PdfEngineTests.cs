@@ -237,6 +237,199 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void Image_ScaleToFit_MaintainsAspectRatio()
+        {
+            // create fake 100x50 PNG
+            using var bmp = new SkiaSharp.SKBitmap(100, 50);
+            using var canvas = new SkiaSharp.SKCanvas(bmp);
+            canvas.Clear(SkiaSharp.SKColors.Red);
+            using var image = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = data.ToArray();
+
+            var img = PdfEngine.Image.GetInstance(bytes);
+            Assert.NotNull(img);
+            img.ScaleToFit(50, 50);
+            Assert.Equal(50f, img.ScaledWidth, 1);
+            Assert.Equal(25f, img.ScaledHeight, 1);
+        }
+
+        [Fact]
+        public void PdfContentByte_RotationMatrixForImage()
+        {
+            using var bmp = new SkiaSharp.SKBitmap(10, 10);
+            using var canvas = new SkiaSharp.SKCanvas(bmp);
+            canvas.Clear(SkiaSharp.SKColors.Blue);
+            using var image = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = data.ToArray();
+            var img = PdfEngine.Image.GetInstance(bytes);
+
+            var cb = new PdfContentByte();
+            img.RotationAngle = 90;
+            cb.DrawImage(img, 20, 30);
+            var stream = cb.ToString();
+            Assert.Contains("cos", stream, StringComparison.OrdinalIgnoreCase); // matrix drawn
+            // since rotation is 90deg, should see values near 0 1 -1 0
+            Assert.Contains("0.000", stream);
+            Assert.Contains("1.000", stream);
+            Assert.Contains("-1.000", stream);
+        }
+
+        [Fact]
+        public void FloatingObject_InlineReducesY()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            var img = PdfEngine.Image.GetInstance(new byte[] { }); // empty may return null
+            // to avoid null, create minimal image
+            using (var bmp2 = new SkiaSharp.SKBitmap(2,2))
+            using (var can2 = new SkiaSharp.SKCanvas(bmp2))
+            {
+                can2.Clear(SkiaSharp.SKColors.Green);
+                using var im2 = SkiaSharp.SKImage.FromBitmap(bmp2);
+                using var d2 = im2.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                var b2 = d2.ToArray();
+                img = PdfEngine.Image.GetInstance(b2);
+            }
+            Assert.NotNull(img);
+            var floatObj = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img!)
+            {
+                Wrapping = WrappingStyle.Inline
+            };
+            ct.AddElement(floatObj);
+            float start = ct.YLine;
+            ct.Go(false);
+            float end = ct.YLine;
+            Assert.True(end < start);
+        }
+
+        [Fact]
+        public void FloatingObject_ExclusionRectangleAdded()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            // create a 10x10 image
+            using var bmp = new SkiaSharp.SKBitmap(10,10);
+            using var cnv = new SkiaSharp.SKCanvas(bmp);
+            cnv.Clear(SkiaSharp.SKColors.Blue);
+            using var im = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var d = im.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = d.ToArray();
+            var img2 = PdfEngine.Image.GetInstance(bytes);
+            Assert.NotNull(img2);
+            img2.SetAbsolutePosition(0, 0);
+
+            var floatObj = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img2!)
+            {
+                Wrapping = WrappingStyle.Square,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 0
+            };
+            ct.AddElement(floatObj);
+            ct.Go(false);
+            Assert.Single(ct.Exclusions);
+            var rect = ct.Exclusions[0];
+            Assert.Equal(0f, rect.Left, 1);
+            Assert.Equal(0f, rect.Bottom, 1);
+            Assert.Equal(10f, rect.Right, 1);
+            Assert.Equal(10f, rect.Top, 1);
+        }
+
+        [Fact]
+        public void FloatingObject_WrapsTextAroundSquare()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            using var bmp = new SkiaSharp.SKBitmap(10,10);
+            using var cnv = new SkiaSharp.SKCanvas(bmp);
+            cnv.Clear(SkiaSharp.SKColors.Blue);
+            using var im = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var d = im.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = d.ToArray();
+            var img2 = PdfEngine.Image.GetInstance(bytes);
+            Assert.NotNull(img2);
+            img2.SetAbsolutePosition(0, 0);
+
+            var floatObj = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img2!)
+            {
+                Wrapping = WrappingStyle.Square,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 50 // mid column height
+            };
+            ct.AddElement(floatObj);
+            // add some text that would normally start at x=0
+            var para = new Paragraph("Hello world", Font.Helvetica(12));
+            ct.AddElement(para);
+            ct.Go(false);
+            var stream = cb.ToString();
+            // first word should be placed right of float (approx >10)
+            Assert.Matches(@"Tm\n[0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ ([3-9][0-9\.\-]+) [0-9\.\-]+", stream);
+        }
+
+        [Fact]
+        public void FloatingObject_TightWrapUsesShape()
+        {
+            var cb2 = new PdfContentByte();
+            var ct2 = new ColumnText(cb2);
+            ct2.SetSimpleColumn(0, 0, 100, 100);
+            using var bmp2 = new SkiaSharp.SKBitmap(10,10);
+            for (int y=0;y<10;y++) for(int x=0;x<10;x++) bmp2.SetPixel(x,y, x<5 ? new SkiaSharp.SKColor(0,0,0,0) : new SkiaSharp.SKColor(0,0,0,255));
+            using var cnv2 = new SkiaSharp.SKCanvas(bmp2);
+            using var im2 = SkiaSharp.SKImage.FromBitmap(bmp2);
+            using var d2 = im2.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes2 = d2.ToArray();
+            var img3 = PdfEngine.Image.GetInstance(bytes2);
+            Assert.NotNull(img3);
+            img3.SetAbsolutePosition(0, 0);
+
+            var floatObj2 = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img3!)
+            {
+                Wrapping = WrappingStyle.Tight,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 50
+            };
+            ct2.AddElement(floatObj2);
+            ct2.AddElement(new Paragraph("Hello world", Font.Helvetica(12)));
+            ct2.Go(false);
+            Assert.True(ct2.Exclusions.Count > 1);
+            var stream2 = cb2.ToString();
+            Assert.Matches(@"Tm\n[0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ ([1-4][0-9\.\-]+) [0-9\.\-]+", stream2);
+        }
+
+        [Fact]
+        public void FloatingObject_TopAndBottomWrapCreatesTwoRects()
+        {
+            var cb3 = new PdfContentByte();
+            var ct3 = new ColumnText(cb3);
+            ct3.SetSimpleColumn(0, 0, 100, 100);
+            using var bmp3 = new SkiaSharp.SKBitmap(10,10);
+            using (var cnv3 = new SkiaSharp.SKCanvas(bmp3)) cnv3.Clear(SkiaSharp.SKColors.Red);
+            using var im3 = SkiaSharp.SKImage.FromBitmap(bmp3);
+            using var d3 = im3.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes3 = d3.ToArray();
+            var img4 = PdfEngine.Image.GetInstance(bytes3);
+            Assert.NotNull(img4);
+            img4.SetAbsolutePosition(0, 0);
+            var floatObj3 = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img4!)
+            {
+                Wrapping = WrappingStyle.TopAndBottom,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 0
+            };
+            ct3.AddElement(floatObj3);
+            ct3.Go(false);
+            Assert.True(ct3.Exclusions.Count >= 2);
+        }
+
+        [Fact]
         public void ColumnText_MixedDirectionChunks()
         {
             var cb = new PdfContentByte();

@@ -81,12 +81,22 @@ public class ColumnText
 
     public int Go(bool simulate = false)
     {
+        // reset exclusion list each run; it will be recomputed based on floats
+        Exclusions.Clear();
+
         var remaining = new List<IElement>();
         var hasMoreText = false;
             int startCount = _elements.Count;
 
             foreach (var element in _elements)
             {
+                // record float exclusions before layout
+                if (element is global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj &&
+                    fobj.Wrapping != WrappingStyle.Inline)
+                {
+                    AddExclusionForFloating(fobj);
+                }
+
                 bool boundaryHit = false;
                 if (TextDirection == TextDirection.Vertical)
                 {
@@ -1007,6 +1017,88 @@ public class ColumnText
             Chunks = chunks.Skip(fitCount).ToList()
         };
         return (firstPara, restPara);
+    }
+
+    /// <summary>
+    /// Add an exclusion rectangle for a floating object so text wraps around it.
+    /// Only objects with absolute positioning are considered.
+    /// </summary>
+    private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj)
+    {
+        if (!fobj.PositionIsAbsolute) return;
+        var img = fobj.Image;
+        if (!img.HasAbsolutePosition) return;
+
+        float left = img.AbsoluteX;
+        float bottom = img.AbsoluteY;
+        float width = fobj.Width;
+        float height = fobj.Height;
+
+        void addRect(float l, float b, float r, float t)
+        {
+            var rect = new SkiaSharp.SKRect(l, b, r, t);
+            if (!Exclusions.Any(r0 => Math.Abs(r0.Left - rect.Left) < 0.1f && Math.Abs(r0.Bottom - rect.Bottom) < 0.1f))
+                Exclusions.Add(rect);
+        }
+
+        switch (fobj.Wrapping)
+        {
+            case WrappingStyle.Square:
+                addRect(left, bottom, left + width, bottom + height);
+                break;
+            case WrappingStyle.TopAndBottom:
+                addRect(left, bottom + height/2, left + width, bottom + height);
+                addRect(left, bottom, left + width, bottom + height/2);
+                break;
+            case WrappingStyle.Tight:
+            case WrappingStyle.Through:
+                try
+                {
+                    var png = img.GetPngData();
+                    using var ms = new MemoryStream(png);
+                    using var codec = SkiaSharp.SKCodec.Create(ms);
+                    if (codec != null)
+                    {
+                        using var bmp = SkiaSharp.SKBitmap.Decode(codec);
+                        if (bmp != null)
+                        {
+                            float scaleX = width / bmp.Width;
+                            float scaleY = height / bmp.Height;
+                            for (int py = 0; py < bmp.Height; py++)
+                            {
+                                int minx = bmp.Width, maxx = -1;
+                                for (int px = 0; px < bmp.Width; px++)
+                                {
+                                    var col = bmp.GetPixel(px, py);
+                                    if (col.Alpha > 10)
+                                    {
+                                        minx = Math.Min(minx, px);
+                                        maxx = Math.Max(maxx, px);
+                                    }
+                                }
+                                if (maxx >= 0)
+                                {
+                                    float yTop = bottom + height - py * scaleY;
+                                    float yBot = yTop - scaleY;
+                                    float xL = left + minx * scaleX;
+                                    float xR = left + (maxx + 1) * scaleX;
+                                    addRect(xL, yBot, xR, yTop);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                catch
+                {
+                    addRect(left, bottom, left + width, bottom + height);
+                    break;
+                }
+                break;
+            default:
+                addRect(left, bottom, left + width, bottom + height);
+                break;
+        }
     }
 
     public static bool HasMoreText(int status) => status == NO_MORE_COLUMN;
