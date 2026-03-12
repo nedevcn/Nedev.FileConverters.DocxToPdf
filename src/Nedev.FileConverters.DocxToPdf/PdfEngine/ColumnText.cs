@@ -78,60 +78,68 @@ public class ColumnText
     {
         var remaining = new List<IElement>();
         var hasMoreText = false;
+            int startCount = _elements.Count;
 
-        foreach (var element in _elements)
-        {
-            if (TextDirection == TextDirection.Vertical)
+            foreach (var element in _elements)
             {
-                if (_yLine <= _llx) // 左边界
+                bool boundaryHit = false;
+                if (TextDirection == TextDirection.Vertical)
                 {
+                    if (_yLine <= _llx) // 左边界
+                    {
+                        boundaryHit = true;
+                    }
+                }
+                else
+                {
+                    if (_yLine <= _lly) // 下边界
+                    {
+                        boundaryHit = true;
+                    }
+                }
+
+                if (boundaryHit)
+                {
+                    // element does not fit in current column/page
                     remaining.Add(element);
                     hasMoreText = true;
                     continue;
                 }
-            }
-            else
-            {
-                if (_yLine <= _lly) // 下边界
-                {
-                    remaining.Add(element);
-                    hasMoreText = true;
-                    continue;
-                }
-            }
 
-            if (!simulate)
-            {
-                if (TextDirection == TextDirection.Vertical)
+                if (!simulate)
                 {
-                    _yLine = RenderElement(element, _ury, _yLine, _lly);
+                    if (TextDirection == TextDirection.Vertical)
+                    {
+                        _yLine = RenderElement(element, _ury, _yLine, _lly);
+                    }
+                    else
+                    {
+                        _yLine = RenderElement(element, _llx, _yLine, _urx);
+                    }
                 }
                 else
                 {
-                    _yLine = RenderElement(element, _llx, _yLine, _urx);
+                    if (TextDirection == TextDirection.Vertical)
+                    {
+                        _yLine -= EstimateHeight(element, _ury - _lly);
+                    }
+                    else
+                    {
+                        _yLine -= EstimateHeight(element, _urx - _llx);
+                    }
                 }
             }
-            else
+
+            _elements.Clear();
+            _elements.AddRange(remaining);
+
+            if (hasMoreText)
             {
-                if (TextDirection == TextDirection.Vertical)
-                {
-                    _yLine -= EstimateHeight(element, _ury - _lly);
-                }
-                else
-                {
-                    _yLine -= EstimateHeight(element, _urx - _llx);
-                }
+                // if nothing was rendered at all (remaining == original list) then give up to avoid infinite loops
+                if (remaining.Count == startCount)
+                    return NO_MORE_TEXT;
+                return NO_MORE_COLUMN;
             }
-        }
-
-        _elements.Clear();
-        _elements.AddRange(remaining);
-
-        if (hasMoreText) return NO_MORE_COLUMN;
-        return NO_MORE_TEXT;
-    }
-
-    /// <summary>
     /// 渲染元素
     /// </summary>
     /// <param name="element">元素</param>

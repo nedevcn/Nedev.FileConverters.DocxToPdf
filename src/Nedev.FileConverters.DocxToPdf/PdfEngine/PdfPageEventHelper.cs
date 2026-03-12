@@ -99,3 +99,34 @@ public class CombinedPageEvent : PdfPageEventHelper
         foreach (var e in _events) e.OnCloseDocument(writer, document);
     }
 }
+    /// <summary>
+    /// Page event that delegates to a HeaderFooterRenderer instance.
+    /// </summary>
+    public class HeaderFooterPageEvent : PdfPageEventHelper
+    {
+        private readonly HeaderFooterRenderer _renderer;
+        private readonly SectionTracker _tracker;
+        private readonly Dictionary<int, SectionPageSettings> _settings;
+
+        public HeaderFooterPageEvent(HeaderFooterRenderer renderer,
+                                      SectionTracker tracker,
+                                      Dictionary<int, SectionPageSettings> settings)
+        {
+            _renderer = renderer;
+            _tracker = tracker;
+            _settings = settings;
+        }
+
+        public override void OnEndPage(PdfWriter writer, PdfDocument document)
+        {
+            int p = document.PageNumber;
+            int total = document.PageNumber;
+            int sectionIndex = _tracker.PageSections.Count >= p ? _tracker.PageSections[p - 1] : 0;
+            int pageInSection = _tracker.PageSections.Take(p).Count(i => i == sectionIndex);
+            int totalInSection = _tracker.PageSections.Count(i => i == sectionIndex);
+            var pageSize = document.PageSize;
+            var settings = _settings.GetValueOrDefault(sectionIndex) ?? new SectionPageSettings();
+            var cb = writer.DirectContent;
+            _renderer.Render(cb, pageSize, p, total, sectionIndex, pageInSection, totalInSection, settings);
+        }
+    }

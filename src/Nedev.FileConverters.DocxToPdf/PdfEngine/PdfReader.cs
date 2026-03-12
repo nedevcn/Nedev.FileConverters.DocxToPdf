@@ -26,7 +26,7 @@ public class PdfReader : IDisposable
 
     private void ParsePages()
     {
-        // attempt to count pages by scanning for "/Type /Page" tokens
+        // attempt to count pages by scanning for "/Type /Page" tokens and capture MediaBox sizes.
         try
         {
             var text = System.Text.Encoding.ASCII.GetString(_pdfData);
@@ -34,15 +34,34 @@ public class PdfReader : IDisposable
             var count = matches.Count;
             if (count <= 0)
                 count = 1;
+
             for (int i = 0; i < count; i++)
             {
-                // we don't know individual sizes yet, assume A4 as fallback
                 _pageSizes.Add(Rectangle.A4);
+            }
+
+            // look for media boxes to override defaults
+            var mediaRegex = new System.Text.RegularExpressions.Regex(@"/MediaBox\s*\[\s*([0-9\.\-]+)\s+([0-9\.\-]+)\s+([0-9\.\-]+)\s+([0-9\.\-]+)\s*\]",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+            int idx = 0;
+            foreach (System.Text.RegularExpressions.Match m in mediaRegex.Matches(text))
+            {
+                if (m.Groups.Count == 5 && idx < _pageSizes.Count)
+                {
+                    if (float.TryParse(m.Groups[1].Value, out var left) &&
+                        float.TryParse(m.Groups[2].Value, out var bottom) &&
+                        float.TryParse(m.Groups[3].Value, out var right) &&
+                        float.TryParse(m.Groups[4].Value, out var top))
+                    {
+                        _pageSizes[idx] = new Rectangle(left, bottom, right, top);
+                        idx++;
+                    }
+                }
             }
         }
         catch
         {
-            // parsing failed; fall back to single A4 page
+            _pageSizes.Clear();
             _pageSizes.Add(Rectangle.A4);
         }
     }

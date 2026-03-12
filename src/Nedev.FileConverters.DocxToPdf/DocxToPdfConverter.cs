@@ -188,13 +188,8 @@ public class DocxToPdfConverter : IFileConverter
         var hasHeaderFooter = _options.RenderHeadersFooters && HasAnyHeaderFooter(body, sectionProps);
         var sectionTracker = new SectionTracker { CurrentSection = 0 };
 
+        // output always goes directly to the provided stream; headers/footers are painted via page events
         Stream targetStream = pdfStream;
-        MemoryStream? tempStream = null;
-        if (hasHeaderFooter)
-        {
-            tempStream = new MemoryStream();
-            targetStream = tempStream;
-        }
 
         var pdfDocument = new iTextDocument(_options.PageSize,
             _options.MarginLeft, _options.MarginRight,
