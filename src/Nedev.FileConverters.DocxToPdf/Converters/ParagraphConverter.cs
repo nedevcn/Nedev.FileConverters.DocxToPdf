@@ -39,6 +39,9 @@ public class ParagraphConverter
     /// <summary>页眉页脚渲染时提供当前页/总页数，用于 PAGE/NUMPAGES 字段</summary>
     public Func<(int Current, int Total)?>? PageNumberProvider { get; set; }
 
+    /// <summary>节信息提供者，用于 SECTION/SECTIONPAGES 字段 (SectionIndex, PageInSection, TotalPagesInSection)</summary>
+    public Func<(int SectionIndex, int PageInSection, int TotalPagesInSection)?>? SectionInfoProvider { get; set; }
+
     /// <summary>遇到脚注/尾注引用时记录 ID，用于文末输出内容</summary>
     public ICollection<int>? FootnoteIdsEncountered { get; set; }
     public ICollection<int>? EndnoteIdsEncountered { get; set; }
@@ -469,6 +472,26 @@ public class ParagraphConverter
                             var display = pageInfo.HasValue
                                 ? (cmd == "PAGE" ? pageInfo.Value.Current.ToString() : pageInfo.Value.Total.ToString())
                                 : "?";
+                            var fieldFont = isHeading
+                                ? _fontHelper.GetFont(headingSize ?? 16f, iTextFont.BOLD)
+                                : _fontHelper.GetFont(runProps, paraRunProps, actualFontSize, forceBold);
+                            pdfParagraph.Add(new iTextChunk(display, fieldFont));
+                            hasContent = true;
+                        }
+                        else if (cmd == "SECTION" || cmd == "SECTIONPAGES")
+                        {
+                            var sectionInfo = SectionInfoProvider?.Invoke();
+                            string display;
+                            if (sectionInfo.HasValue)
+                            {
+                                display = cmd == "SECTION" 
+                                    ? sectionInfo.Value.PageInSection.ToString()
+                                    : sectionInfo.Value.TotalPagesInSection.ToString();
+                            }
+                            else
+                            {
+                                display = "?";
+                            }
                             var fieldFont = isHeading
                                 ? _fontHelper.GetFont(headingSize ?? 16f, iTextFont.BOLD)
                                 : _fontHelper.GetFont(runProps, paraRunProps, actualFontSize, forceBold);
@@ -943,6 +966,26 @@ public class ParagraphConverter
                 var display = pageInfo.HasValue
                     ? (cmd == "PAGE" ? pageInfo.Value.Current.ToString() : pageInfo.Value.Total.ToString())
                     : "?";
+                var fieldFont = isHeading
+                    ? _fontHelper.GetFont(headingSize ?? 16f, iTextFont.BOLD)
+                    : _fontHelper.GetFont(runProps, paraRunProps, actualFontSize, forceBold);
+                pdfParagraph.Add(new iTextChunk(display, fieldFont));
+                hasContent = true;
+            }
+            else if (cmd == "SECTION" || cmd == "SECTIONPAGES")
+            {
+                var sectionInfo = SectionInfoProvider?.Invoke();
+                string display;
+                if (sectionInfo.HasValue)
+                {
+                    display = cmd == "SECTION" 
+                        ? sectionInfo.Value.PageInSection.ToString()
+                        : sectionInfo.Value.TotalPagesInSection.ToString();
+                }
+                else
+                {
+                    display = "?";
+                }
                 var fieldFont = isHeading
                     ? _fontHelper.GetFont(headingSize ?? 16f, iTextFont.BOLD)
                     : _fontHelper.GetFont(runProps, paraRunProps, actualFontSize, forceBold);

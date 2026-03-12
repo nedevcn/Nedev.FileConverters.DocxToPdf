@@ -101,6 +101,10 @@ public class OMMLRenderer
                 RenderRadical(canvas, rad, x, y, actualFontSize);
                 break;
 
+            case M.Matrix matrix:
+                RenderMatrix(canvas, matrix, x, y, actualFontSize);
+                break;
+
             case M.OfficeMath omath:
                 // 递归渲染 OfficeMath 子元素
                 var currentX = x;
@@ -292,6 +296,128 @@ public class OMMLRenderer
     }
 
     /// <summary>
+    /// 渲染矩阵
+    /// </summary>
+    private void RenderMatrix(SKCanvas canvas, M.Matrix matrix, float x, float y, float fontSize)
+    {
+        var rows = matrix.Elements<M.MatrixRow>().ToList();
+        if (rows.Count == 0) return;
+
+        var cellPadding = 8f;
+        var rowHeight = fontSize * 1.5f;
+
+        // 计算每列的最大宽度
+        var colCount = rows.Max(r => r.Elements<M.Base>().Count());
+        var colWidths = new float[colCount];
+
+        for (int col = 0; col < colCount; col++)
+        {
+            float maxWidth = 0;
+            foreach (var row in rows)
+            {
+                var bases = row.Elements<M.Base>().ToList();
+                if (col < bases.Count)
+                {
+                    var cellMath = bases[col].GetFirstChild<M.OfficeMath>();
+                    if (cellMath != null)
+                    {
+                        var cellSize = MeasureElement(canvas, cellMath, fontSize);
+                        maxWidth = Math.Max(maxWidth, cellSize.Width);
+                    }
+                }
+            }
+            colWidths[col] = maxWidth + cellPadding * 2;
+        }
+
+        // 绘制矩阵边框（括号）
+        var totalWidth = colWidths.Sum() + 10;
+        var totalHeight = rows.Count * rowHeight + 10;
+
+        using var bracketPaint = new SKPaint
+        {
+            Color = SKColors.Black,
+            StrokeWidth = 2,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke
+        };
+
+        // 左括号
+        canvas.DrawLine(x + 3, y - totalHeight + fontSize, x + 3, y + 5, bracketPaint);
+        canvas.DrawArc(new SKRect(x, y - totalHeight + fontSize - 5, x + 10, y - totalHeight + fontSize + 5), 90, 90, false, bracketPaint);
+        canvas.DrawArc(new SKRect(x, y, x + 10, y + 10), 180, 90, false, bracketPaint);
+
+        // 右括号
+        var rightX = x + totalWidth;
+        canvas.DrawLine(rightX - 3, y - totalHeight + fontSize, rightX - 3, y + 5, bracketPaint);
+        canvas.DrawArc(new SKRect(rightX - 10, y - totalHeight + fontSize - 5, rightX, y - totalHeight + fontSize + 5), 0, -90, false, bracketPaint);
+        canvas.DrawArc(new SKRect(rightX - 10, y, rightX, y + 10), -90, -90, false, bracketPaint);
+
+        // 渲染每个单元格
+        var currentY = y - totalHeight + fontSize + 5;
+        foreach (var row in rows)
+        {
+            var currentX = x + 8;
+            var bases = row.Elements<M.Base>().ToList();
+
+            for (int col = 0; col < bases.Count && col < colCount; col++)
+            {
+                var cellMath = bases[col].GetFirstChild<M.OfficeMath>();
+                if (cellMath != null)
+                {
+                    var cellSize = MeasureElement(canvas, cellMath, fontSize);
+                    var cellX = currentX + (colWidths[col] - cellPadding * 2 - cellSize.Width) / 2 + cellPadding;
+                    var cellY = currentY + (rowHeight + cellSize.Baseline) / 2;
+                    RenderElement(canvas, cellMath, cellX, cellY, fontSize);
+                }
+                currentX += colWidths[col];
+            }
+            currentY += rowHeight;
+        }
+    }
+
+    /// <summary>
+    /// 测量矩阵尺寸
+    /// </summary>
+    private ElementSize MeasureMatrix(SKCanvas canvas, M.Matrix matrix, float fontSize)
+    {
+        var size = new ElementSize();
+        var rows = matrix.Elements<M.MatrixRow>().ToList();
+        if (rows.Count == 0) return size;
+
+        var cellPadding = 8f;
+        var rowHeight = fontSize * 1.5f;
+
+        // 计算每列的最大宽度
+        var colCount = rows.Max(r => r.Elements<M.Base>().Count());
+        var colWidths = new float[colCount];
+
+        for (int col = 0; col < colCount; col++)
+        {
+            float maxWidth = 0;
+            foreach (var row in rows)
+            {
+                var bases = row.Elements<M.Base>().ToList();
+                if (col < bases.Count)
+                {
+                    var cellMath = bases[col].GetFirstChild<M.OfficeMath>();
+                    if (cellMath != null)
+                    {
+                        var cellSize = MeasureElement(canvas, cellMath, fontSize);
+                        maxWidth = Math.Max(maxWidth, cellSize.Width);
+                    }
+                }
+            }
+            colWidths[col] = maxWidth + cellPadding * 2;
+        }
+
+        size.Width = colWidths.Sum() + 20; // 加上括号空间
+        size.Height = rows.Count * rowHeight + 20;
+        size.Baseline = size.Height / 2;
+
+        return size;
+    }
+
+    /// <summary>
     /// 测量元素尺寸
     /// </summary>
     private ElementSize MeasureElement(SKCanvas canvas, OpenXmlElement element, float fontSize)
@@ -362,6 +488,10 @@ public class OMMLRenderer
                         size.Baseline = radSize.Baseline;
                     }
                 }
+                break;
+
+            case M.Matrix matrix:
+                size = MeasureMatrix(canvas, matrix, fontSize);
                 break;
 
             case M.OfficeMath omath:

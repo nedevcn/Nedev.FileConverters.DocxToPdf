@@ -71,6 +71,16 @@ public sealed class DrawingRasterizer
         }
         else if (uri.Contains("/diagram", StringComparison.OrdinalIgnoreCase))
         {
+            // 使用 SmartArtRenderer 渲染 SmartArt
+            var smartArtRenderer = new SmartArtRenderer(_document, _options);
+            var diagramElement = graphicData.Elements().FirstOrDefault(e => e.LocalName == "diagram");
+            if (diagramElement != null)
+            {
+                var result = smartArtRenderer.RenderToPng(diagramElement, pixelWidth, pixelHeight);
+                if (result != null) return result;
+            }
+
+            // 如果渲染失败，回退到占位符
             var summary = ExtractDiagramSummary(graphicData);
             return RasterizePlaceholder("SmartArt", summary, pixelWidth, pixelHeight);
         }

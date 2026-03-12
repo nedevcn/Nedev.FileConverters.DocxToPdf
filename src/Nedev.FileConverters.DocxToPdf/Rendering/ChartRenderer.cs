@@ -65,6 +65,15 @@ public class ChartRenderer
                 case ChartType.Pie:
                     RenderPieChart(canvas, chartData, pixelWidth, pixelHeight);
                     break;
+                case ChartType.Area:
+                    RenderAreaChart(canvas, chartData, pixelWidth, pixelHeight);
+                    break;
+                case ChartType.Scatter:
+                    RenderScatterChart(canvas, chartData, pixelWidth, pixelHeight);
+                    break;
+                case ChartType.Radar:
+                    RenderRadarChart(canvas, chartData, pixelWidth, pixelHeight);
+                    break;
                 default:
                     RenderGenericChart(canvas, chartData, pixelWidth, pixelHeight);
                     break;
@@ -137,6 +146,14 @@ public class ChartRenderer
                 case "areaChart":
                     data.ChartType = ChartType.Area;
                     ExtractAreaSeries(plotArea, data);
+                    break;
+                case "scatterChart":
+                    data.ChartType = ChartType.Scatter;
+                    ExtractScatterSeries(plotArea, data);
+                    break;
+                case "radarChart":
+                    data.ChartType = ChartType.Radar;
+                    ExtractRadarSeries(plotArea, data);
                     break;
             }
         }
@@ -228,6 +245,36 @@ public class ChartRenderer
         if (areaChart == null) return;
 
         foreach (var ser in areaChart.Elements().Where(e => e.LocalName == "ser"))
+        {
+            var series = ExtractSeriesData(ser);
+            if (series != null) data.Series.Add(series);
+        }
+    }
+
+    /// <summary>
+    /// 提取散点图系列数据
+    /// </summary>
+    private void ExtractScatterSeries(C.PlotArea plotArea, ChartData data)
+    {
+        var scatterChart = plotArea.Elements().FirstOrDefault(e => e.LocalName == "scatterChart");
+        if (scatterChart == null) return;
+
+        foreach (var ser in scatterChart.Elements().Where(e => e.LocalName == "ser"))
+        {
+            var series = ExtractSeriesData(ser);
+            if (series != null) data.Series.Add(series);
+        }
+    }
+
+    /// <summary>
+    /// 提取雷达图系列数据
+    /// </summary>
+    private void ExtractRadarSeries(C.PlotArea plotArea, ChartData data)
+    {
+        var radarChart = plotArea.Elements().FirstOrDefault(e => e.LocalName == "radarChart");
+        if (radarChart == null) return;
+
+        foreach (var ser in radarChart.Elements().Where(e => e.LocalName == "ser"))
         {
             var series = ExtractSeriesData(ser);
             if (series != null) data.Series.Add(series);
@@ -571,6 +618,352 @@ public class ChartRenderer
 
         // 绘制图例
         RenderLegend(canvas, data, width - margin - 80, margin);
+    }
+
+    /// <summary>
+    /// 渲染面积图
+    /// </summary>
+    private void RenderAreaChart(SKCanvas canvas, ChartData data, int width, int height)
+    {
+        var margin = 60f;
+        var chartWidth = width - margin * 2;
+        var chartHeight = height - margin * 2 - 30;
+
+        // 绘制标题
+        if (!string.IsNullOrEmpty(data.Title))
+        {
+            using var titlePaint = new SKPaint
+            {
+                Color = SKColors.Black,
+                TextSize = 16,
+                IsAntialias = true
+            };
+            canvas.DrawText(data.Title, width / 2f, margin - 20, titlePaint);
+        }
+
+        // 计算最大值
+        var maxValue = data.Series.SelectMany(s => s.Values).Max();
+        if (maxValue == 0) maxValue = 1;
+
+        // 绘制坐标轴
+        using var axisPaint = new SKPaint
+        {
+            Color = SKColors.Gray,
+            StrokeWidth = 1,
+            IsAntialias = true
+        };
+
+        canvas.DrawLine(margin, margin, margin, height - margin, axisPaint);
+        canvas.DrawLine(margin, height - margin, width - margin, height - margin, axisPaint);
+
+        // 绘制Y轴刻度和标签
+        var ySteps = 5;
+        using var labelPaint = new SKPaint
+        {
+            Color = SKColors.Gray,
+            TextSize = 10,
+            IsAntialias = true
+        };
+
+        for (int i = 0; i <= ySteps; i++)
+        {
+            var y = height - margin - (chartHeight * i / ySteps);
+            var value = maxValue * i / ySteps;
+            canvas.DrawText(value.ToString("F1"), margin - 5, y + 3, labelPaint);
+            canvas.DrawLine(margin - 3, y, margin, y, axisPaint);
+        }
+
+        // 绘制面积图
+        var colors = new[] { SKColors.Blue, SKColors.Red, SKColors.Green, SKColors.Orange, SKColors.Purple };
+        var xStep = chartWidth / (data.Series[0].Categories.Count - 1);
+
+        for (int serIdx = 0; serIdx < data.Series.Count; serIdx++)
+        {
+            var series = data.Series[serIdx];
+            var color = colors[serIdx % colors.Length];
+
+            using var areaPaint = new SKPaint
+            {
+                Color = color.WithAlpha(128), // 半透明填充
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill
+            };
+
+            using var linePaint = new SKPaint
+            {
+                Color = color,
+                StrokeWidth = 2,
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke
+            };
+
+            using var path = new SKPath();
+            path.MoveTo(margin, height - margin);
+
+            for (int i = 0; i < series.Values.Count; i++)
+            {
+                var x = margin + i * xStep;
+                var y = height - margin - (float)(series.Values[i] / maxValue * chartHeight);
+                
+                if (i == 0)
+                    path.LineTo(x, y);
+                else
+                    path.LineTo(x, y);
+            }
+
+            path.LineTo(margin + (series.Values.Count - 1) * xStep, height - margin);
+            path.Close();
+
+            canvas.DrawPath(path, areaPaint);
+
+            // 绘制边界线
+            using var linePath = new SKPath();
+            for (int i = 0; i < series.Values.Count; i++)
+            {
+                var x = margin + i * xStep;
+                var y = height - margin - (float)(series.Values[i] / maxValue * chartHeight);
+                
+                if (i == 0)
+                    linePath.MoveTo(x, y);
+                else
+                    linePath.LineTo(x, y);
+            }
+            canvas.DrawPath(linePath, linePaint);
+        }
+
+        // 绘制X轴标签
+        for (int i = 0; i < data.Series[0].Categories.Count; i++)
+        {
+            var x = margin + i * xStep;
+            canvas.DrawText(data.Series[0].Categories[i], x - 10, height - margin + 15, labelPaint);
+        }
+
+        // 绘制图例
+        RenderLegend(canvas, data, width - margin - 100, margin);
+    }
+
+    /// <summary>
+    /// 渲染散点图
+    /// </summary>
+    private void RenderScatterChart(SKCanvas canvas, ChartData data, int width, int height)
+    {
+        var margin = 60f;
+        var chartWidth = width - margin * 2;
+        var chartHeight = height - margin * 2 - 30;
+
+        // 绘制标题
+        if (!string.IsNullOrEmpty(data.Title))
+        {
+            using var titlePaint = new SKPaint
+            {
+                Color = SKColors.Black,
+                TextSize = 16,
+                IsAntialias = true
+            };
+            canvas.DrawText(data.Title, width / 2f, margin - 20, titlePaint);
+        }
+
+        // 计算最大值
+        var maxValue = data.Series.SelectMany(s => s.Values).Max();
+        if (maxValue == 0) maxValue = 1;
+
+        // 绘制坐标轴
+        using var axisPaint = new SKPaint
+        {
+            Color = SKColors.Gray,
+            StrokeWidth = 1,
+            IsAntialias = true
+        };
+
+        canvas.DrawLine(margin, margin, margin, height - margin, axisPaint);
+        canvas.DrawLine(margin, height - margin, width - margin, height - margin, axisPaint);
+
+        // 绘制Y轴刻度和标签
+        var ySteps = 5;
+        using var labelPaint = new SKPaint
+        {
+            Color = SKColors.Gray,
+            TextSize = 10,
+            IsAntialias = true
+        };
+
+        for (int i = 0; i <= ySteps; i++)
+        {
+            var y = height - margin - (chartHeight * i / ySteps);
+            var value = maxValue * i / ySteps;
+            canvas.DrawText(value.ToString("F1"), margin - 5, y + 3, labelPaint);
+            canvas.DrawLine(margin - 3, y, margin, y, axisPaint);
+        }
+
+        // 绘制散点
+        var colors = new[] { SKColors.Blue, SKColors.Red, SKColors.Green, SKColors.Orange, SKColors.Purple };
+        var xStep = chartWidth / (data.Series[0].Categories.Count - 1);
+
+        for (int serIdx = 0; serIdx < data.Series.Count; serIdx++)
+        {
+            var series = data.Series[serIdx];
+            var color = colors[serIdx % colors.Length];
+
+            using var pointPaint = new SKPaint
+            {
+                Color = color,
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill
+            };
+
+            for (int i = 0; i < series.Values.Count; i++)
+            {
+                var x = margin + i * xStep;
+                var y = height - margin - (float)(series.Values[i] / maxValue * chartHeight);
+                
+                // 绘制圆点
+                canvas.DrawCircle(x, y, 6, pointPaint);
+            }
+        }
+
+        // 绘制X轴标签
+        for (int i = 0; i < data.Series[0].Categories.Count; i++)
+        {
+            var x = margin + i * xStep;
+            canvas.DrawText(data.Series[0].Categories[i], x - 10, height - margin + 15, labelPaint);
+        }
+
+        // 绘制图例
+        RenderLegend(canvas, data, width - margin - 100, margin);
+    }
+
+    /// <summary>
+    /// 渲染雷达图
+    /// </summary>
+    private void RenderRadarChart(SKCanvas canvas, ChartData data, int width, int height)
+    {
+        var margin = 60f;
+        var chartSize = Math.Min(width - margin * 2, height - margin * 2 - 30);
+        var centerX = width / 2f;
+        var centerY = height / 2f + 10;
+        var radius = chartSize / 2f;
+
+        // 绘制标题
+        if (!string.IsNullOrEmpty(data.Title))
+        {
+            using var titlePaint = new SKPaint
+            {
+                Color = SKColors.Black,
+                TextSize = 16,
+                IsAntialias = true
+            };
+            canvas.DrawText(data.Title, width / 2f, margin - 20, titlePaint);
+        }
+
+        var categories = data.Series[0].Categories;
+        var numCategories = categories.Count;
+        var angleStep = 2 * MathF.PI / numCategories;
+
+        // 绘制网格
+        using var gridPaint = new SKPaint
+        {
+            Color = SKColors.LightGray,
+            StrokeWidth = 1,
+            IsAntialias = true
+        };
+
+        // 绘制同心圆网格
+        for (int i = 1; i <= 5; i++)
+        {
+            var r = radius * i / 5;
+            canvas.DrawCircle(centerX, centerY, r, gridPaint);
+        }
+
+        // 绘制轴线
+        using var axisPaint = new SKPaint
+        {
+            Color = SKColors.Gray,
+            StrokeWidth = 1,
+            IsAntialias = true
+        };
+
+        for (int i = 0; i < numCategories; i++)
+        {
+            var angle = i * angleStep - MathF.PI / 2;
+            var x = centerX + radius * MathF.Cos(angle);
+            var y = centerY + radius * MathF.Sin(angle);
+            canvas.DrawLine(centerX, centerY, x, y, axisPaint);
+
+            // 绘制标签
+            using var labelPaint = new SKPaint
+            {
+                Color = SKColors.Gray,
+                TextSize = 10,
+                IsAntialias = true
+            };
+            var labelX = centerX + (radius + 20) * MathF.Cos(angle);
+            var labelY = centerY + (radius + 20) * MathF.Sin(angle);
+            canvas.DrawText(categories[i], labelX - 20, labelY, labelPaint);
+        }
+
+        // 绘制数据系列
+        var colors = new[] { SKColors.Blue, SKColors.Red, SKColors.Green, SKColors.Orange, SKColors.Purple };
+        var maxValue = data.Series.SelectMany(s => s.Values).Max();
+        if (maxValue == 0) maxValue = 1;
+
+        for (int serIdx = 0; serIdx < data.Series.Count; serIdx++)
+        {
+            var series = data.Series[serIdx];
+            var color = colors[serIdx % colors.Length];
+
+            using var fillPaint = new SKPaint
+            {
+                Color = color.WithAlpha(64),
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill
+            };
+
+            using var linePaint = new SKPaint
+            {
+                Color = color,
+                StrokeWidth = 2,
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke
+            };
+
+            using var path = new SKPath();
+            for (int i = 0; i < series.Values.Count; i++)
+            {
+                var angle = i * angleStep - MathF.PI / 2;
+                var r = radius * (float)(series.Values[i] / maxValue);
+                var x = centerX + r * MathF.Cos(angle);
+                var y = centerY + r * MathF.Sin(angle);
+
+                if (i == 0)
+                    path.MoveTo(x, y);
+                else
+                    path.LineTo(x, y);
+            }
+            path.Close();
+
+            canvas.DrawPath(path, fillPaint);
+            canvas.DrawPath(path, linePaint);
+
+            // 绘制数据点
+            using var pointPaint = new SKPaint
+            {
+                Color = color,
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill
+            };
+
+            for (int i = 0; i < series.Values.Count; i++)
+            {
+                var angle = i * angleStep - MathF.PI / 2;
+                var r = radius * (float)(series.Values[i] / maxValue);
+                var x = centerX + r * MathF.Cos(angle);
+                var y = centerY + r * MathF.Sin(angle);
+                canvas.DrawCircle(x, y, 4, pointPaint);
+            }
+        }
+
+        // 绘制图例
+        RenderLegend(canvas, data, width - margin - 100, margin);
     }
 
     /// <summary>

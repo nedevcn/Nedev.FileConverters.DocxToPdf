@@ -159,12 +159,13 @@ public class HeaderFooterRenderer
     /// <summary>
     /// ????????????(????? PdfStamper ??)
     /// </summary>
-    public void Render(PdfContentByte cb, Rectangle pageSize, int pageNum, int totalPages, int sectionIndex, int pageNumInSection, SectionPageSettings settings)
+    public void Render(PdfContentByte cb, Rectangle pageSize, int pageNum, int totalPages, int sectionIndex, int pageNumInSection, int totalPagesInSection, SectionPageSettings settings)
     {
         var (headerBody, footerBody) = GetForPage(sectionIndex, pageNum, pageNumInSection);
         if (headerBody == null && footerBody == null) return;
 
         _paragraphConverter.PageNumberProvider = () => (pageNum, totalPages);
+        _paragraphConverter.SectionInfoProvider = () => (sectionIndex, pageNumInSection, totalPagesInSection);
 
         var pageHeight = pageSize.Height;
         var pageWidth = pageSize.Width;

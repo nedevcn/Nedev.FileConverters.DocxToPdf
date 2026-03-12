@@ -721,8 +721,18 @@ public class DocxToPdfConverter : IFileConverter
         // 我们需要知道每一页在当前节中是第几页
         
         var sectionPageCounts = new Dictionary<int, int>(); // sectionIndex -> total pages so far
+        var sectionTotalPages = new Dictionary<int, int>(); // sectionIndex -> total pages in section
         var pageNumInSection = new int[totalPages + 1];
         
+        // 第一遍：统计每个节的总页数
+        for (var i = 1; i <= totalPages; i++)
+        {
+            var sectionIndex = i <= tracker.PageSections.Count ? tracker.PageSections[i - 1] : 0;
+            if (!sectionTotalPages.ContainsKey(sectionIndex)) sectionTotalPages[sectionIndex] = 0;
+            sectionTotalPages[sectionIndex]++;
+        }
+        
+        // 第二遍：计算每页在节内的页码
         for (var i = 1; i <= totalPages; i++)
         {
             var sectionIndex = i <= tracker.PageSections.Count ? tracker.PageSections[i - 1] : 0;
@@ -741,7 +751,8 @@ public class DocxToPdfConverter : IFileConverter
             if (!sectionSettings.TryGetValue(sectionIndex, out var settings))
                 settings = sectionSettings.GetValueOrDefault(0) ?? new SectionPageSettings();
 
-            renderer.Render(cb, pageSize, p, totalPages, sectionIndex, pageNumInSection[p], settings);
+            var totalPagesInSection = sectionTotalPages.GetValueOrDefault(sectionIndex, 1);
+            renderer.Render(cb, pageSize, p, totalPages, sectionIndex, pageNumInSection[p], totalPagesInSection, settings);
         }
     }
 
@@ -1050,6 +1061,84 @@ public class DocxToPdfConverter : IFileConverter
         {
             Console.Error.WriteLine($"[DocxToPdfConverter] Failed to parse DOCVARIABLE field: {ex.Message}");
             return $"«{variableName}»";
+        }
+    }
+
+    /// <summary>
+    /// 解析 SHAPEDOG 字段 - 形状锚点信息
+    /// 格式: SHAPEDOG [\s switch]
+    /// 返回形状的锚点信息（页码、段落号等）
+    /// </summary>
+    private static string? ParseShapedogField(string instruction)
+    {
+        if (string.IsNullOrWhiteSpace(instruction))
+            return null;
+
+        try
+        {
+            // 提取开关参数
+            var switchMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"\\([a-z])\s*(\d*)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (switchMatch.Success)
+            {
+                var switchChar = switchMatch.Groups[1].Value.ToLower();
+                var switchValue = switchMatch.Groups[2].Value;
+
+                return switchChar switch
+                {
+                    "s" => "1",  // 形状锚定的页码
+                    "p" => "1",  // 形状锚定的段落号
+                    "r" => switchValue,  // 相对页码
+                    _ => "1"
+                };
+            }
+
+            // 默认返回页码 1
+            return "1";
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DocxToPdfConverter] Failed to parse SHAPEDOG field: {ex.Message}");
+            return "1";
+        }
+    }
+
+    /// <summary>
+    /// 解析 LISTNUM 字段 - 列表编号
+    /// 格式: LISTNUM [name] [\l level] [\s start]
+    /// 返回当前列表项的编号
+    /// </summary>
+    private static string? ParseListnumField(string instruction)
+    {
+        if (string.IsNullOrWhiteSpace(instruction))
+            return null;
+
+        try
+        {
+            // 提取列表名称（如果有）
+            var nameMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"LISTNUM\s+(\w+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var listName = nameMatch.Success ? nameMatch.Groups[1].Value : "";
+
+            // 提取级别开关
+            var levelMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"\\l\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var level = levelMatch.Success ? int.Parse(levelMatch.Groups[1].Value) : 0;
+
+            // 提取起始值开关
+            var startMatch = System.Text.RegularExpressions.Regex.Match(instruction, @"\\s\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var start = startMatch.Success ? int.Parse(startMatch.Groups[1].Value) : 1;
+
+            // 根据级别生成编号
+            return level switch
+            {
+                0 => $"{start}.",
+                1 => $"  {(char)('a' + start - 1)}.",
+                2 => $"    {(char)('i' + start - 1)}.",
+                _ => $"{start}."
+            };
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DocxToPdfConverter] Failed to parse LISTNUM field: {ex.Message}");
+            return "1.";
         }
     }
 
