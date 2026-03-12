@@ -6,7 +6,6 @@ using Nedev.FileConverters.DocxToPdf.Converters;
 using Nedev.FileConverters.DocxToPdf.Helpers;
 using Nedev.FileConverters.DocxToPdf.Models;
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
-using Nedev.FileConverters.DocxToPdf.PdfEngine.Compatibility;
 using Nedev.FileConverters.Core;
 using iTextDocument = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfDocument;
 using iTextWriter = Nedev.FileConverters.DocxToPdf.PdfEngine.PdfWriter;
