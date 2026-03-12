@@ -1,7 +1,10 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.Helpers;
+using Nedev.FileConverters.DocxToPdf.Models;
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
+using Nedev.FileConverters.DocxToPdf.Rendering;
 using iTextParagraph = Nedev.FileConverters.DocxToPdf.PdfEngine.Paragraph;
 using iTextChunk = Nedev.FileConverters.DocxToPdf.PdfEngine.Chunk;
 using iTextImage = Nedev.FileConverters.DocxToPdf.PdfEngine.Image;
@@ -15,11 +18,13 @@ public class DrawingMLConverter
 {
     private readonly WordprocessingDocument _document;
     private readonly FontHelper _fontHelper;
+    private readonly DrawingMLRenderer _renderer;
 
-    public DrawingMLConverter(WordprocessingDocument document, FontHelper fontHelper)
+    public DrawingMLConverter(WordprocessingDocument document, FontHelper fontHelper, ConvertOptions? options = null)
     {
         _document = document;
         _fontHelper = fontHelper;
+        _renderer = new DrawingMLRenderer(document, options ?? ConvertOptions.Default);
     }
 
     /// <summary>
@@ -29,133 +34,68 @@ public class DrawingMLConverter
     {
         try
         {
-            // 查找 GraphicData
-            var graphicData = drawing.Descendants<DocumentFormat.OpenXml.Drawing.GraphicData>().FirstOrDefault();
-            if (graphicData == null) return null;
-
-            // 检查是否是图片 (通过查找 Blip)
-            var blip = graphicData.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().FirstOrDefault();
-            if (blip != null)
+            // 首先尝试使用 SkiaSharp 渲染器渲染为图片
+            var extent = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent>().FirstOrDefault();
+            if (extent != null)
             {
-                return ConvertBlip(blip, drawing, pageWidth);
+                var widthPx = (int)EMU.ToPixels(extent.Cx?.Value ?? 914400);
+                var heightPx = (int)EMU.ToPixels(extent.Cy?.Value ?? 914400);
+
+                // 限制最大尺寸
+                if (widthPx > 2000) widthPx = 2000;
+                if (heightPx > 2000) heightPx = 2000;
+
+                var pngBytes = _renderer.RenderToPng(drawing, widthPx, heightPx);
+                if (pngBytes != null && pngBytes.Length > 0)
+                {
+                    var pdfImage = iTextImage.GetInstance(pngBytes);
+
+                    // 设置尺寸
+                    var widthPt = StyleHelper.EmuToPoints(extent.Cx?.Value ?? 0);
+                    var heightPt = StyleHelper.EmuToPoints(extent.Cy?.Value ?? 0);
+
+                    if (widthPt > 0 && heightPt > 0)
+                    {
+                        // 限制最大宽度
+                        if (widthPt > pageWidth)
+                        {
+                            var ratio = pageWidth / widthPt;
+                            widthPt = pageWidth;
+                            heightPt *= ratio;
+                        }
+                        pdfImage.ScaleAbsolute(widthPt, heightPt);
+                    }
+
+                    // 检查是否是浮动对象
+                    var anchor = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.Anchor>().FirstOrDefault();
+                    if (anchor != null)
+                    {
+                        return new FloatingObject(pdfImage);
+                    }
+
+                    return pdfImage;
+                }
             }
 
-            // 检查是否是形状 (通过查找 Shape)
-            var shape = graphicData.Descendants<DocumentFormat.OpenXml.Drawing.Shape>().FirstOrDefault();
-            if (shape != null)
-            {
-                return ConvertShape(shape, pageWidth);
-            }
-
-            // 提取所有文本作为回退
-            return ExtractTextFromGraphicData(graphicData, pageWidth);
+            // 如果渲染失败，回退到文本提取
+            return ExtractTextFromDrawing(drawing, pageWidth);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[DrawingMLConverter] Failed to convert drawing: {ex.Message}");
-            return null;
+            return ExtractTextFromDrawing(drawing, pageWidth);
         }
     }
 
     /// <summary>
-    /// 转换图片 (Blip)
+    /// 从 Drawing 提取文本
     /// </summary>
-    private IElement? ConvertBlip(DocumentFormat.OpenXml.Drawing.Blip blip, DocumentFormat.OpenXml.Wordprocessing.Drawing drawing, float pageWidth)
+    private IElement? ExtractTextFromDrawing(DocumentFormat.OpenXml.Wordprocessing.Drawing drawing, float pageWidth)
     {
-        var embedId = blip.Embed?.Value;
-        if (string.IsNullOrEmpty(embedId)) return null;
+        var graphicData = drawing.Descendants<DocumentFormat.OpenXml.Drawing.GraphicData>().FirstOrDefault();
+        if (graphicData == null) return null;
 
-        try
-        {
-            var imagePart = _document.MainDocumentPart?.GetPartById(embedId) as ImagePart;
-            if (imagePart == null) return null;
-
-            using var stream = imagePart.GetStream();
-            using var memoryStream = new MemoryStream();
-            stream.CopyTo(memoryStream);
-            var imageBytes = memoryStream.ToArray();
-
-            if (imageBytes.Length == 0) return null;
-
-            var pdfImage = iTextImage.GetInstance(imageBytes);
-
-            // 获取尺寸
-            var extent = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent>().FirstOrDefault();
-            if (extent != null)
-            {
-                var widthPt = StyleHelper.EmuToPoints(extent.Cx?.Value ?? 0);
-                var heightPt = StyleHelper.EmuToPoints(extent.Cy?.Value ?? 0);
-
-                if (widthPt > 0 && heightPt > 0)
-                {
-                    // 限制最大宽度
-                    if (widthPt > pageWidth)
-                    {
-                        var ratio = pageWidth / widthPt;
-                        widthPt = pageWidth;
-                        heightPt *= ratio;
-                    }
-                    pdfImage.ScaleAbsolute(widthPt, heightPt);
-                }
-            }
-
-            // 检查是否是浮动对象
-            var anchor = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.Anchor>().FirstOrDefault();
-            if (anchor != null)
-            {
-                return new FloatingObject(pdfImage);
-            }
-
-            return pdfImage;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[DrawingMLConverter] Failed to convert blip: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 转换单个形状
-    /// </summary>
-    private IElement? ConvertShape(DocumentFormat.OpenXml.Drawing.Shape shape, float pageWidth)
-    {
-        // 获取形状中的文本
-        var texts = new List<string>();
-
-        // 查找 TextBody
-        var txBody = shape.Descendants<DocumentFormat.OpenXml.Drawing.TextBody>().FirstOrDefault();
-        if (txBody != null)
-        {
-            foreach (var para in txBody.Descendants<DocumentFormat.OpenXml.Drawing.Paragraph>())
-            {
-                var paraText = string.Join("", para.Descendants<DocumentFormat.OpenXml.Drawing.Text>().Select(t => t.Text));
-                if (!string.IsNullOrWhiteSpace(paraText))
-                {
-                    texts.Add(paraText);
-                }
-            }
-        }
-
-        if (texts.Count == 0) return null;
-
-        // 创建 PDF 段落
-        var pdfPara = new iTextParagraph();
-        var font = _fontHelper.GetFont(12f);
-
-        foreach (var text in texts)
-        {
-            pdfPara.Add(new iTextChunk(text, font));
-        }
-
-        return pdfPara;
-    }
-
-    /// <summary>
-    /// 从 GraphicData 提取文本
-    /// </summary>
-    private IElement? ExtractTextFromGraphicData(DocumentFormat.OpenXml.Drawing.GraphicData graphicData, float pageWidth)
-    {
+        // 提取所有文本
         var texts = graphicData.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
             .Select(t => t.Text)
             .Where(t => !string.IsNullOrWhiteSpace(t))

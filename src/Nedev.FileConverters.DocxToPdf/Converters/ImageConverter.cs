@@ -72,7 +72,7 @@ public class ImageConverter
         var themePart = _document.MainDocumentPart?.ThemePart;
         _colorScheme = themePart?.Theme?.ThemeElements?.ColorScheme;
         _drawingRasterizer = new DrawingRasterizer(_document, _options);
-        _drawingMLConverter = new DrawingMLConverter(_document, fontHelper ?? new FontHelper(options, _colorScheme));
+        _drawingMLConverter = new DrawingMLConverter(_document, fontHelper ?? new FontHelper(options, _colorScheme), options);
     }
 
     /// <summary>
