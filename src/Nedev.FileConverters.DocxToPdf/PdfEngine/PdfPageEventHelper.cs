@@ -130,3 +130,35 @@ public class CombinedPageEvent : PdfPageEventHelper
             _renderer.Render(cb, pageSize, p, total, sectionIndex, pageInSection, totalInSection, settings);
         }
     }
+
+    /// <summary>
+    /// Page event that renders a simple text watermark centered on each page.
+    /// </summary>
+    public class WatermarkPageEvent : PdfPageEventHelper
+    {
+        private readonly WatermarkOptions _options;
+
+        public WatermarkPageEvent(WatermarkOptions options)
+        {
+            _options = options;
+        }
+
+        public override void OnEndPage(PdfWriter writer, PdfDocument document)
+        {
+            if (_options == null || string.IsNullOrEmpty(_options.Text))
+                return;
+
+            var cb = writer.DirectContent;
+            var pageSize = document.PageSize;
+            float x = pageSize.Width / 2f;
+            float y = pageSize.Height / 2f;
+            cb.SaveState();
+            cb.SetColorFill(BaseColor.Gray);
+            cb.BeginText();
+            cb.SetFontAndSize("F1", _options.FontSize > 0 ? _options.FontSize : 60);
+            cb.SetTextMatrix(1, 0, 0, 1, x, y);
+            cb.ShowText(_options.Text);
+            cb.EndText();
+            cb.RestoreState();
+        }
+    }

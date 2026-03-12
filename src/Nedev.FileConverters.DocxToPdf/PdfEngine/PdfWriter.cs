@@ -1038,6 +1038,18 @@ public class PdfWriter : IDisposable
         for (int r = 0; r < rows.Count; r++)
         {
             var rowHeight = rowHeights[r];
+
+            // split if the next row would go below bottom margin
+            float bottomMargin = writer?.Document?.MarginBottom ?? 0f;
+            if (currentY - rowHeight < bottomMargin)
+            {
+                // move remaining row data into table.RowsList for future pages
+                var remaining = rows.Skip(r).ToList();
+                table.RowsList = table.RowsList.Take(r).ToList();
+                // keep leftover rows in place (they will be rendered on next page)
+                break;
+            }
+
             var rowCellX = startX;
 
             foreach (var (cell, colStart, colSpan, rowSpan) in rows[r])

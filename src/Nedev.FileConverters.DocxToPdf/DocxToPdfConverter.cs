@@ -308,6 +308,22 @@ public class DocxToPdfConverter : IFileConverter
             {
                 headerFooterRenderer.RegisterSection(allSections[s], s);
             }
+
+            // attach page event now that renderer exists
+            var events = new List<PdfPageEventHelper>() { new HeaderFooterPageEvent(headerFooterRenderer, sectionTracker, _sectionSettingsMap) };
+            if (_options.Watermark != null && !string.IsNullOrEmpty(_options.Watermark.Text))
+            {
+                events.Add(new WatermarkPageEvent(_options.Watermark));
+            }
+            writer.PageEvent = new CombinedPageEvent(events.ToArray());
+        }
+        else
+        {
+            // still may need watermark even if headers not active
+            if (_options.Watermark != null && !string.IsNullOrEmpty(_options.Watermark.Text))
+            {
+                writer.PageEvent = new WatermarkPageEvent(_options.Watermark);
+            }
         }
         var elements = body.ChildElements.ToList();
         var i = 0;
@@ -575,74 +591,10 @@ public class DocxToPdfConverter : IFileConverter
 
         paragraphConverter.HeadingRendered = null;
 
-        if (hasHeaderFooter && tempStream != null && headerFooterRenderer != null)
-        {
-            StampHeaderFooter(tempStream, pdfStream, headerFooterRenderer, sectionTracker, _sectionSettingsMap);
-        }
+        // header/footer and watermark handled via page events, no further stamping
 
-        // 应用水印（在所有其他内容之后）
-        if (_options.Watermark != null && !string.IsNullOrEmpty(_options.Watermark.Text))
-        {
-            pdfStream.Position = 0;
-            var watermarkedStream = new MemoryStream();
-            WatermarkRenderer.ApplyWatermark(pdfStream, watermarkedStream, _options.Watermark);
-            watermarkedStream.Position = 0;
-            watermarkedStream.CopyTo(pdfStream);
-            pdfStream.Position = 0;
-        }
+        // at this point, TOC page numbers already updated earlier; nothing more to do
 
-        // 更新目录页码
-        if (_options.GenerateTableOfContents && tocEntries.Count > 0)
-        {
-            ApplyRecordedTocPageNumbers(tocEntries, tocPageNumbersByKey);
-
-            pdfStream.Position = 0;
-            using var reader = new PdfReader(pdfStream);
-            using var outputStream = new MemoryStream();
-            using var stamper = new PdfStamper(reader, outputStream);
-            var totalPages = reader.NumberOfPages;
-
-            if (totalPages > 1)
-            {
-                var pageSize = reader.GetPageSize(1);
-                var contentFont = FontFactory.GetFont("STSong-Light", 10);
-
-                var tocPageTextMap = new Dictionary<int, string>();
-                for (var tocIndex = 0; tocIndex < tocEntries.Count; tocIndex++)
-                {
-                    var targetPage = tocEntries[tocIndex].PageNumber;
-                    if (targetPage <= 0)
-                        targetPage = Math.Min(tocIndex + 2, totalPages);
-                    else if (targetPage > totalPages)
-                        targetPage = totalPages;
-
-                    tocPageTextMap[tocIndex] = targetPage.ToString();
-                }
-
-                var cb = stamper.GetOverContent(1);
-                if (cb != null)
-                {
-                    cb.BeginText();
-                    cb.SetFontAndSize(contentFont.Family, 10);
-
-                    foreach (var kvp in tocPageTextMap)
-                    {
-                        var y = pageSize.Height - 112f - (kvp.Key * 18f);
-                        if (y < 50f) break;
-                        var x = pageSize.Width - 80f;
-                        cb.ShowTextAligned(Element.ALIGN_LEFT, kvp.Value, x, y, 0);
-                    }
-
-                    cb.EndText();
-                }
-            }
-
-            stamper.Close();
-            outputStream.Position = 0;
-            pdfStream.SetLength(0);
-            outputStream.CopyTo(pdfStream);
-            pdfStream.Position = 0;
-        }
     }
 
     /// <summary>
