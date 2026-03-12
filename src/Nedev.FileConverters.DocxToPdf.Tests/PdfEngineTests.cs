@@ -81,6 +81,69 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void PdfReader_ParsesXrefAndObjects()
+        {
+            // create a real pdf using writer
+            var doc = new PdfDocument();
+            using var ms = new MemoryStream();
+            var writer = PdfWriter.GetInstance(doc, ms);
+            writer.CloseStream = false;
+            doc.Open();
+            doc.NewPage();
+            doc.Add(new Paragraph("test", Font.Helvetica(12)));
+            doc.Close();
+            writer.Close();
+            var data = ms.ToArray();
+
+            var reader = new PdfReader(data);
+            Assert.True(reader.ObjectOffsets.Count >= 1);
+            Assert.Equal(1, reader.NumberOfPages);
+            int pageObj = reader.GetPageObjectNumber(1);
+            Assert.True(pageObj > 0);
+            var objText = reader.GetObjectText(pageObj);
+            Assert.NotNull(objText);
+            Assert.Contains("/Type /Page", objText);
+        }
+
+        [Fact]
+        public void PdfStamper_AppendsOverUnderContent()
+        {
+            // build a minimal PDF so reader can parse structure
+            var doc = new PdfDocument();
+            using var ms = new MemoryStream();
+            var writer = PdfWriter.GetInstance(doc, ms);
+            writer.CloseStream = false;
+            doc.Open();
+            doc.NewPage();
+            doc.Add(new Paragraph("hello", Font.Helvetica(12)));
+            doc.Close();
+            writer.Close();
+
+            var reader = new PdfReader(ms.ToArray());
+            using var outMs = new MemoryStream();
+            var stamper = new PdfStamper(reader, outMs);
+            stamper.GetOverContent(1).BeginText();
+            stamper.GetOverContent(1).ShowText("overtext");
+            stamper.GetUnderContent(1).BeginText();
+            stamper.GetUnderContent(1).ShowText("undertext");
+            stamper.Close();
+
+            var resultBytes = outMs.ToArray();
+            var resultReader = new PdfReader(resultBytes);
+            Assert.Equal(1, resultReader.NumberOfPages);
+            // ensure over/under strings appear somewhere in the PDF data
+            var str = System.Text.Encoding.UTF8.GetString(resultBytes);
+            Assert.Contains("overtext", str);
+            Assert.Contains("undertext", str);
+
+            // page object should now reference a stream containing the new content
+            int pageObj2 = resultReader.GetPageObjectNumber(1);
+            var pageText = resultReader.GetObjectText(pageObj2);
+            Assert.NotNull(pageText);
+            Assert.Contains("overtext", pageText);
+        }
+
+        [Fact]
         public void PdfStamper_AppendsOverUnderContent()
         {
             var fake = System.Text.Encoding.ASCII.GetBytes("dummy");

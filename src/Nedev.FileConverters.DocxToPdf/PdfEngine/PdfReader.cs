@@ -267,26 +267,146 @@ public class PdfStamper : IDisposable
 
     public void Close()
     {
-        // write the original PDF bytes first
-        var originalData = _reader.GetPageContent(1);
-        _outputStream.Write(originalData, 0, originalData.Length);
+        // write the entire original PDF bytes
+        var originalBytes = _reader.GetRawBytes();
+        _outputStream.Write(originalBytes, 0, originalBytes.Length);
 
-        // then append any over/under content as comments so that stamping is not a no-op
-        for (int i = 0; i < _overContent.Count; i++)
+        // track new objects and their offsets for incremental xref
+        var newOffsets = new Dictionary<int, long>();
+        int maxObj = _reader.ObjectOffsets.Keys.DefaultIfEmpty(0).Max();
+
+        // helper to write a new object with given body text (dictionary or stream) and record offset
+        void WriteNewObject(int objNum, string body)
         {
-            var over = _overContent[i]?.GetContent();
-            if (!string.IsNullOrEmpty(over))
-            {
-                var comment = System.Text.Encoding.UTF8.GetBytes($"\n% OverContent page {i+1}\n{over}\n");
-                _outputStream.Write(comment, 0, comment.Length);
-            }
-            var under = _underContent[i]?.GetContent();
+            newOffsets[objNum] = _outputStream.Position;
+            var header = $"{objNum} 0 obj\n";
+            WriteBytes(System.Text.Encoding.Latin1.GetBytes(header));
+            WriteBytes(System.Text.Encoding.Latin1.GetBytes(body));
+            WriteBytes(System.Text.Encoding.Latin1.GetBytes("\nendobj\n\n"));
+        }
+
+        // write stream object helper
+        int WriteStream(int objNum, string content)
+        {
+            var bytes = System.Text.Encoding.Latin1.GetBytes(content);
+            var dict = $"<< /Length {bytes.Length} >>\nstream\n";
+            newOffsets[objNum] = _outputStream.Position;
+            var header = $"{objNum} 0 obj\n" + dict;
+            WriteBytes(System.Text.Encoding.Latin1.GetBytes(header));
+            _outputStream.Write(bytes, 0, bytes.Length);
+            WriteBytes(System.Text.Encoding.Latin1.GetBytes("\nendstream\nendobj\n\n"));
+            return objNum;
+        }
+
+        // for each page prepare new streams and page object modifications
+        for (int page = 1; page <= _overContent.Count; page++)
+        {
+            var over = _overContent[page - 1]?.GetContent();
+            var under = _underContent[page - 1]?.GetContent();
+            if (string.IsNullOrEmpty(over) && string.IsNullOrEmpty(under))
+                continue;
+
+            List<int> extraStreams = new();
             if (!string.IsNullOrEmpty(under))
             {
-                var comment2 = System.Text.Encoding.UTF8.GetBytes($"\n% UnderContent page {i+1}\n{under}\n");
-                _outputStream.Write(comment2, 0, comment2.Length);
+                maxObj++;
+                WriteStream(maxObj, under);
+                extraStreams.Add(maxObj);
+            }
+            if (!string.IsNullOrEmpty(over))
+            {
+                maxObj++;
+                WriteStream(maxObj, over);
+                extraStreams.Add(maxObj);
+            }
+
+            // modify corresponding page object by writing a new version
+            int pageObj = _reader.GetPageObjectNumber(page);
+            if (pageObj > 0)
+            {
+                var orig = _reader.GetObjectText(pageObj) ?? "";
+                // insert extras into /Contents
+                string modified = orig;
+                int ci = modified.IndexOf("/Contents");
+                if (ci >= 0)
+                {
+                    int start = ci + "/Contents".Length;
+                    while (start < modified.Length && char.IsWhiteSpace(modified[start])) start++;
+                    if (start < modified.Length && modified[start] == '[')
+                    {
+                        int end = modified.IndexOf(']', start);
+                        if (end > start)
+                        {
+                            string inside = modified.Substring(start + 1, end - start - 1);
+                            foreach (var s in extraStreams)
+                                inside += " " + s + " 0 R";
+                            modified = modified.Substring(0, start + 1) + inside + modified.Substring(end);
+                        }
+                    }
+                    else
+                    {
+                        // single reference
+                        int end = modified.IndexOf("R", start);
+                        if (end > start)
+                        {
+                            string existing = modified.Substring(start, end - start + 1);
+                            string arr = "[ " + existing;
+                            foreach (var s in extraStreams)
+                                arr += " " + s + " 0 R";
+                            arr += " ]";
+                            modified = modified.Substring(0, start) + arr + modified.Substring(end + 1);
+                        }
+                    }
+                }
+                else
+                {
+                    int pos = modified.LastIndexOf(">>");
+                    if (pos >= 0)
+                    {
+                        modified = modified.Substring(0, pos) + " /Contents ";
+                        if (extraStreams.Count == 1)
+                            modified += extraStreams[0] + " 0 R ";
+                        else
+                        {
+                            modified += "[";
+                            foreach (var s in extraStreams) modified += " " + s + " 0 R";
+                            modified += " ] ";
+                        }
+                        modified += modified.Substring(pos);
+                    }
+                }
+                WriteNewObject(pageObj, modified);
             }
         }
+
+        // write incremental xref table
+        long xrefStart = _outputStream.Position;
+        var allNewObjs = newOffsets.Keys.OrderBy(n => n).ToList();
+        var headerLine = $"xref\n0 {allNewObjs.Max() + 1}\n";
+        WriteBytes(System.Text.Encoding.Latin1.GetBytes(headerLine));
+        // zero entry
+        WriteBytes(System.Text.Encoding.Latin1.GetBytes("0000000000 65535 f \r\n"));
+        for (int i = 1; i <= allNewObjs.Max(); i++)
+        {
+            if (newOffsets.TryGetValue(i, out var off))
+            {
+                var entry = $"{off:D10} 00000 n \r\n";
+                WriteBytes(System.Text.Encoding.Latin1.GetBytes(entry));
+            }
+            else
+            {
+                WriteBytes(System.Text.Encoding.Latin1.GetBytes("0000000000 65535 f \r\n"));
+            }
+        }
+
+        // write trailer including Prev if available
+        var trailerSb = new System.Text.StringBuilder();
+        trailerSb.Append("trailer\n<< ");
+        if (_reader.XrefOffset.HasValue)
+            trailerSb.Append($"/Prev {_reader.XrefOffset.Value} ");
+        trailerSb.Append($"/Size {allNewObjs.Max() + 1} >>\n");
+        trailerSb.Append($"startxref\n{xrefStart}\n%%EOF\n");
+        WriteBytes(System.Text.Encoding.Latin1.GetBytes(trailerSb.ToString()));
 
         _outputStream.Flush();
     }
