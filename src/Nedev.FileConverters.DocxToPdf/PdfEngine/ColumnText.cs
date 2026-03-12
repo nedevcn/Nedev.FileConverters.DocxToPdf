@@ -1020,6 +1020,30 @@ public class ColumnText
     }
 
     /// <summary>
+    /// Rotate an <see cref="SKBitmap"/> by the given angle (degrees clockwise) and return a new bitmap
+    /// containing the rotated result with a transparent background.
+    /// </summary>
+    private static SkiaSharp.SKBitmap RotateBitmap(SkiaSharp.SKBitmap src, float angle)
+    {
+        if (angle == 0 || src == null) return src;
+        var rad = -angle * Math.PI / 180.0;
+        var cos = Math.Abs(Math.Cos(rad));
+        var sin = Math.Abs(Math.Sin(rad));
+        int newW = (int)Math.Ceiling(src.Width * cos + src.Height * sin);
+        int newH = (int)Math.Ceiling(src.Height * cos + src.Width * sin);
+        var info = new SkiaSharp.SKImageInfo(newW, newH, src.ColorType, src.AlphaType);
+        var rotated = new SkiaSharp.SKBitmap(info);
+        using var canvas = new SkiaSharp.SKCanvas(rotated);
+        canvas.Clear(SkiaSharp.SKColors.Transparent);
+        canvas.Translate(newW / 2f, newH / 2f);
+        canvas.RotateDegrees(angle);
+        canvas.Translate(-src.Width / 2f, -src.Height / 2f);
+        canvas.DrawBitmap(src, 0, 0);
+        canvas.Flush();
+        return rotated;
+    }
+
+    /// <summary>
     /// Add an exclusion rectangle for a floating object so text wraps around it.
     /// Only objects with absolute positioning are considered.
     /// </summary>
@@ -1033,73 +1057,92 @@ public class ColumnText
         float bottom = img.AbsoluteY;
         float width = fobj.Width;
         float height = fobj.Height;
+            float angle = img.RotationAngle;
 
-        void addRect(float l, float b, float r, float t)
-        {
-            var rect = new SkiaSharp.SKRect(l, b, r, t);
-            if (!Exclusions.Any(r0 => Math.Abs(r0.Left - rect.Left) < 0.1f && Math.Abs(r0.Bottom - rect.Bottom) < 0.1f))
-                Exclusions.Add(rect);
-        }
+            // compute bounding box of rotated image (if any) and offsets for mask
+            float rotWidth = width;
+            float rotHeight = height;
+            float leftBB = left;
+            float bottomBB = bottom;
+            if (angle != 0)
+            {
+                var rad = -angle * Math.PI / 180.0; // match PdfWriter rotation sign
+                var cos = (float)Math.Cos(rad);
+                var sin = (float)Math.Sin(rad);
+                rotWidth = Math.Abs(width * cos) + Math.Abs(height * sin);
+                rotHeight = Math.Abs(height * cos) + Math.Abs(width * sin);
+                float cx = left + width / 2f;
+                float cy = bottom + height / 2f;
+                leftBB = cx - rotWidth / 2f;
+                bottomBB = cy - rotHeight / 2f;
+            }
 
-        switch (fobj.Wrapping)
-        {
-            case WrappingStyle.Square:
-                addRect(left, bottom, left + width, bottom + height);
-                break;
-            case WrappingStyle.TopAndBottom:
-                addRect(left, bottom + height/2, left + width, bottom + height);
-                addRect(left, bottom, left + width, bottom + height/2);
-                break;
-            case WrappingStyle.Tight:
-            case WrappingStyle.Through:
-                try
-                {
-                    var png = img.GetPngData();
-                    using var ms = new MemoryStream(png);
-                    using var codec = SkiaSharp.SKCodec.Create(ms);
-                    if (codec != null)
+            void addRect(float l, float b, float r, float t)
+            {
+                var rect = new SkiaSharp.SKRect(l, b, r, t);
+                if (!Exclusions.Any(r0 => Math.Abs(r0.Left - rect.Left) < 0.1f && Math.Abs(r0.Bottom - rect.Bottom) < 0.1f))
+                    Exclusions.Add(rect);
+            }
+
+            switch (fobj.Wrapping)
+            {
+                case WrappingStyle.Square:
+                    addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight);
+                    break;
+                case WrappingStyle.TopAndBottom:
+                    addRect(leftBB, bottomBB + rotHeight / 2f, leftBB + rotWidth, bottomBB + rotHeight);
+                    addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight / 2f);
+                    break;
+                case WrappingStyle.Tight:
+                case WrappingStyle.Through:
+                    try
                     {
-                        using var bmp = SkiaSharp.SKBitmap.Decode(codec);
-                        if (bmp != null)
+                        var png = img.GetPngData();
+                        using var ms = new MemoryStream(png);
+                        using var codec = SkiaSharp.SKCodec.Create(ms);
+                        if (codec != null)
                         {
-                            float scaleX = width / bmp.Width;
-                            float scaleY = height / bmp.Height;
-                            for (int py = 0; py < bmp.Height; py++)
+                            using var bmpOrig = SkiaSharp.SKBitmap.Decode(codec);
+                            if (bmpOrig != null)
                             {
-                                int minx = bmp.Width, maxx = -1;
-                                for (int px = 0; px < bmp.Width; px++)
+                                SKBitmap bmp = bmpOrig;
+                                if (angle != 0)
                                 {
-                                    var col = bmp.GetPixel(px, py);
-                                    if (col.Alpha > 10)
+                                    // rotate bitmap so mask matches rendered orientation
+                                    bmp = RotateBitmap(bmpOrig, angle);
+                                }
+                                float scaleX = rotWidth / bmp.Width;
+                                float scaleY = rotHeight / bmp.Height;
+                                for (int py = 0; py < bmp.Height; py++)
+                                {
+                                    int minx = bmp.Width, maxx = -1;
+                                    for (int px = 0; px < bmp.Width; px++)
                                     {
-                                        minx = Math.Min(minx, px);
-                                        maxx = Math.Max(maxx, px);
+                                        var col = bmp.GetPixel(px, py);
+                                        if (col.Alpha > 10)
+                                        {
+                                            minx = Math.Min(minx, px);
+                                            maxx = Math.Max(maxx, px);
+                                        }
+                                    }
+                                    if (maxx >= 0)
+                                    {
+                                        float yTop = bottomBB + rotHeight - py * scaleY;
+                                        float yBot = yTop - scaleY;
+                                        float xL = leftBB + minx * scaleX;
+                                        float xR = leftBB + (maxx + 1) * scaleX;
+                                        addRect(xL, yBot, xR, yTop);
                                     }
                                 }
-                                if (maxx >= 0)
-                                {
-                                    float yTop = bottom + height - py * scaleY;
-                                    float yBot = yTop - scaleY;
-                                    float xL = left + minx * scaleX;
-                                    float xR = left + (maxx + 1) * scaleX;
-                                    addRect(xL, yBot, xR, yTop);
-                                }
+                                break;
                             }
-                            break;
                         }
                     }
-                }
-                catch
-                {
-                    addRect(left, bottom, left + width, bottom + height);
+                    catch
+                    {
+                        addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight);
+                        break;
+                    }
                     break;
-                }
-                break;
-            default:
-                addRect(left, bottom, left + width, bottom + height);
-                break;
-        }
-    }
-
-    public static bool HasMoreText(int status) => status == NO_MORE_COLUMN;
-}
+                default:
+                    addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight);

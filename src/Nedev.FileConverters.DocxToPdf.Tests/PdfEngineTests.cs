@@ -430,6 +430,70 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void FloatingObject_RotatedSquareWrapAddsBoundingBox()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            using var bmp = new SkiaSharp.SKBitmap(10,5);
+            using var cnv = new SkiaSharp.SKCanvas(bmp);
+            cnv.Clear(SkiaSharp.SKColors.Blue);
+            using var im = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var d = im.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = d.ToArray();
+            var img2 = PdfEngine.Image.GetInstance(bytes);
+            Assert.NotNull(img2);
+            img2.RotationAngle = 45;
+            img2.SetAbsolutePosition(0, 0);
+
+            var floatObj = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img2!)
+            {
+                Wrapping = WrappingStyle.Square,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 0
+            };
+            ct.AddElement(floatObj);
+            ct.Go(false);
+            Assert.Single(ct.Exclusions);
+            var rect = ct.Exclusions[0];
+            Assert.True(rect.Right - rect.Left > 10f);
+            Assert.True(rect.Top - rect.Bottom > 5f);
+        }
+
+        [Fact]
+        public void FloatingObject_RotatedTightWrapStillRespectsShape()
+        {
+            var cb2 = new PdfContentByte();
+            var ct2 = new ColumnText(cb2);
+            ct2.SetSimpleColumn(0, 0, 100, 100);
+            using var bmp2 = new SkiaSharp.SKBitmap(10,10);
+            for (int y=0;y<10;y++) for(int x=0;x<10;x++) bmp2.SetPixel(x,y, x<5 ? new SkiaSharp.SKColor(0,0,0,0) : new SkiaSharp.SKColor(0,0,0,255));
+            using var cnv2 = new SkiaSharp.SKCanvas(bmp2);
+            using var im2 = SkiaSharp.SKImage.FromBitmap(bmp2);
+            using var d2 = im2.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes2 = d2.ToArray();
+            var img3 = PdfEngine.Image.GetInstance(bytes2);
+            Assert.NotNull(img3);
+            img3.RotationAngle = 45;
+            img3.SetAbsolutePosition(0, 0);
+
+            var floatObj2 = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img3!)
+            {
+                Wrapping = WrappingStyle.Tight,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 50
+            };
+            ct2.AddElement(floatObj2);
+            ct2.AddElement(new Paragraph("Hello world", Font.Helvetica(12)));
+            ct2.Go(false);
+            Assert.True(ct2.Exclusions.Count > 1);
+            var stream2 = cb2.ToString();
+            Assert.Matches(@"Tm\n[0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ [0-9\.\-]+ ([1-4][0-9\.\-]+) [0-9\.\-]+", stream2);
+        }
+
+        [Fact]
         public void ColumnText_MixedDirectionChunks()
         {
             var cb = new PdfContentByte();
