@@ -210,6 +210,33 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void ColumnText_HyphenationAddsHyphen()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 40, 100);
+            ct.AddElement(new Paragraph("ABCDEFGHIJ", Font.Helvetica(12)));
+            ct.Go(false);
+            var stream = cb.ToString();
+            Assert.Contains("002D", stream); // hyphen char appears
+        }
+
+        [Fact]
+        public void ColumnText_HangingPunctuationShiftsLeft()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            var para = new Paragraph("", Font.Helvetica(12));
+            para.Add(new Chunk("!", Font.Helvetica(12)));
+            ct.AddElement(para);
+            ct.Go(false);
+            var stream = cb.ToString();
+            // look for a negative x in Tm commands
+            Assert.Matches("[0-9\\.\\-]+ [0-9\\.\\-]+ [0-9\\.\\-]+ [0-9\\.\\-]+ -[0-9\\.]+", stream);
+        }
+
+        [Fact]
         public void ColumnText_MixedDirectionChunks()
         {
             var cb = new PdfContentByte();

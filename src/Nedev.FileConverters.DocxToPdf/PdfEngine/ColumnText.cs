@@ -499,8 +499,8 @@ public class ColumnText
                 float len = test.GetAdvance(direction);
                 if (maxLen > 0 && len > maxLen && w.Length > 1)
                 {
-                    // split off first character
-                    var first = w.Substring(0, 1);
+                    // split off first character; add hyphen for hyphenation
+                    var first = w.Substring(0, 1) + "-";
                     var ch = new Chunk(first, chunk.Font)
                     {
                         BackgroundColor = chunk.BackgroundColor,
@@ -674,6 +674,14 @@ public class ColumnText
         if (!simulate)
         {
             _canvas.SaveState();
+
+            // hanging punctuation: if chunk is a single punctuation and we're at margin
+            if (effectiveDir == TextDirection.Horizontal &&
+                chunk.Content.Length == 1 &&
+                ".,;:!?".Contains(chunk.Content[0]))
+            {
+                x -= chunk.Font.Size * 0.2f;
+            }
 
             if (chunk.BackgroundColor != null)
             {
