@@ -11,7 +11,57 @@ public class PdfReader : IDisposable
     private readonly List<int> _streamOffsets = [];
     private readonly List<int> _streamLengths = [];
 
+    // map object number -> byte offset (from xref table)
+    private readonly Dictionary<int, int> _objectOffsets = new();
+    // keep page object numbers in order of discovery
+    private readonly List<int> _pageObjectNumbers = [];
+    // offset of the startxref position from the original file (if parsed)
+    public int? XrefOffset { get; private set; }
+
     public int NumberOfPages => _pageSizes.Count;
+
+    /// <summary>
+    /// Offsets parsed from the xref table. Useful for reading raw objects.
+    /// </summary>
+    public IReadOnlyDictionary<int,int> ObjectOffsets => _objectOffsets;
+
+    /// <summary>
+    /// Object number corresponding to the given page (1-based).
+    /// Returns -1 if not known.
+    /// </summary>
+    public int GetPageObjectNumber(int pageNum)
+    {
+        if (pageNum < 1 || pageNum > _pageObjectNumbers.Count)
+            return -1;
+        return _pageObjectNumbers[pageNum - 1];
+    }
+
+    /// <summary>
+    /// Return the raw text of the object with the given number, or null if unknown.
+    /// The returned string does not include the "N 0 obj" header or the trailing "endobj".
+    /// </summary>
+    public string? GetObjectText(int objNum)
+    {
+        if (_objectOffsets.TryGetValue(objNum, out var offset))
+        {
+            // read from offset to endobj
+            try
+            {
+                var text = System.Text.Encoding.ASCII.GetString(_pdfData, offset, _pdfData.Length - offset);
+                var idx = text.IndexOf("endobj");
+                if (idx >= 0)
+                {
+                    return text.Substring(0, idx);
+                }
+                return text;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+        return null;
+    }
 
     public PdfReader(byte[] pdfData)
     {
@@ -77,6 +127,19 @@ public class PdfReader : IDisposable
                     }
                 }
             }
+
+            // parse xref table and gather object offsets
+            ParseXref(text);
+
+            // identify page object numbers in object order
+            foreach (var kvp in _objectOffsets.OrderBy(k => k.Key))
+            {
+                var objText = GetObjectText(kvp.Key);
+                if (objText != null && objText.Contains("/Type /Page"))
+                {
+                    _pageObjectNumbers.Add(kvp.Key);
+                }
+            }
         }
         catch
         {
@@ -90,6 +153,56 @@ public class PdfReader : IDisposable
         if (pageNum < 1 || pageNum > _pageSizes.Count)
             return Rectangle.A4;
         return _pageSizes[pageNum - 1];
+    }
+
+    /// <summary>
+    /// Return the raw PDF bytes originally passed to the reader.
+    /// </summary>
+    public byte[] GetRawBytes() => _pdfData;
+
+    private void ParseXref(string text)
+    {
+        var startXrefRegex = new System.Text.RegularExpressions.Regex(@"startxref\s+(\d+)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        var m = startXrefRegex.Match(text);
+        if (m.Success && int.TryParse(m.Groups[1].Value, out var offset))
+        {
+            XrefOffset = offset;
+            if (offset >= 0 && offset < text.Length)
+            {
+                var xrefText = text.Substring(offset);
+                var lines = xrefText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                if (lines.Length > 0 && lines[0].Trim() == "xref")
+                {
+                    int idx = 1;
+                    while (idx < lines.Length)
+                    {
+                        var headerParts = lines[idx].Trim().Split(' ');
+                        if (headerParts.Length == 2 &&
+                            int.TryParse(headerParts[0], out int start) &&
+                            int.TryParse(headerParts[1], out int count))
+                        {
+                            idx++;
+                            for (int i = 0; i < count && idx < lines.Length; i++, idx++)
+                            {
+                                var entry = lines[idx];
+                                var parts = entry.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                                if (parts.Length >= 3 &&
+                                    int.TryParse(parts[0], out var off) &&
+                                    parts[2] == "n")
+                                {
+                                    _objectOffsets[start + i] = off;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public byte[] GetPageContent(int pageNum)
