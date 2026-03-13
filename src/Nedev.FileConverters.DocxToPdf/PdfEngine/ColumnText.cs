@@ -1069,6 +1069,35 @@ public class ColumnText
 private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj, float startInline, float startBlock)
         {
             var img = fobj.Image;
+            // helper to collapse overlapping/touching rectangles
+            void MergeExclusions()
+            {
+                if (Exclusions.Count <= 1) return;
+                var merged = new List<SkiaSharp.SKRect>();
+                foreach (var rect in Exclusions)
+                {
+                    bool combined = false;
+                    for (int i = 0; i < merged.Count; i++)
+                    {
+                        var m = merged[i];
+                        bool overlap = !(rect.Right < m.Left || rect.Left > m.Right || rect.Top < m.Bottom || rect.Bottom > m.Top);
+                        if (overlap)
+                        {
+                            merged[i] = new SkiaSharp.SKRect(
+                                Math.Min(m.Left, rect.Left),
+                                Math.Min(m.Bottom, rect.Bottom),
+                                Math.Max(m.Right, rect.Right),
+                                Math.Max(m.Top, rect.Top));
+                            combined = true;
+                            break;
+                        }
+                    }
+                    if (!combined)
+                        merged.Add(rect);
+                }
+                Exclusions.Clear();
+                Exclusions.AddRange(merged);
+            }
             if (!img.HasAbsolutePosition && fobj.PositionIsAbsolute)
                 return; // can't compute coordinates without absolute image
 
@@ -1166,6 +1195,9 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
 
             void addRect(float l, float b, float r, float t)
             {
+                // apply padding from object
+                float pad = fobj.TextDistance;
+                l -= pad; b -= pad; r += pad; t += pad;
                 var rect = new SkiaSharp.SKRect(l, b, r, t);
                 if (!Exclusions.Any(r0 => Math.Abs(r0.Left - rect.Left) < 0.1f && Math.Abs(r0.Bottom - rect.Bottom) < 0.1f))
                     Exclusions.Add(rect);
@@ -1301,3 +1333,6 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                     break;
                 default:
                     addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight);
+            }
+            MergeExclusions();
+        }

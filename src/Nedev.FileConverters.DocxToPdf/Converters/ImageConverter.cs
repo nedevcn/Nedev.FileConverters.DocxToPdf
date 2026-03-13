@@ -327,6 +327,23 @@ public class ImageConverter
         var wrapThrough = anchor.GetFirstChild<DW.WrapThrough>();
         var wrapTopBottom = anchor.GetFirstChild<DW.WrapTopBottom>();
 
+        // parse distances if present (attributes distT, distB, distL, distR in EMU)
+        if (wrapSquare != null || wrapTight != null || wrapThrough != null || wrapTopBottom != null)
+        {
+            var wrapElement = wrapSquare ?? wrapTight ?? wrapThrough ?? wrapTopBottom;
+            float dist = 0;
+            foreach (var attr in new[] { "distT", "distB", "distL", "distR" })
+            {
+                var v = wrapElement.GetAttribute(attr, null)?.Value;
+                if (long.TryParse(v, out var emu))
+                {
+                    float pt = emu / 914400f * 72f; // EMU to points (914400 EMU = 1 inch)
+                    dist = Math.Max(dist, pt);
+                }
+            }
+            floatObj.TextDistance = dist;
+        }
+
         if (wrapSquare != null) floatObj.Wrapping = WrappingStyle.Square;
         else if (wrapTight != null) floatObj.Wrapping = WrappingStyle.Tight;
         else if (wrapThrough != null) floatObj.Wrapping = WrappingStyle.Through;

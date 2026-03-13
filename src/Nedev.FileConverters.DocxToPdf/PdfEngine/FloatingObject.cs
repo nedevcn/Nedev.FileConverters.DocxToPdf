@@ -24,13 +24,10 @@ public class FloatingObject : IElement
     public float Left { get; set; }
     public float Top { get; set; }
     public bool PositionIsAbsolute { get; set; }
-
-    public float Width => Image.ScaledWidth;
-    public float Height => Image.ScaledHeight;
-
-    public int Type => 100;
-    public bool IsContent() => true;
-    public bool IsNestable() => false;
+        /// <summary>
+        /// Distance from text (points). Applies equally on all sides; used to pad exclusion rectangles.
+        /// </summary>
+        public float TextDistance { get; set; }
 
     public FloatingObject(Image image)
     {
