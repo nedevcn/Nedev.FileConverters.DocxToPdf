@@ -102,6 +102,42 @@ public class DrawingMLConverter
     }
 
     /// <summary>
+    /// Split string into directional runs and reverse those identified as RTL.
+    /// This is a very simple approximation of the Unicode bidi algorithm.
+    /// </summary>
+    private static string ApplyBasicBidi(string text, string? language)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        bool IsRtlChar(char c)
+        {
+            var cat = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            return cat == System.Globalization.UnicodeCategory.OtherLetter &&
+                   (c >= '\u0590' && c <= '\u08FF'); // Hebrew, Arabic ranges
+        }
+        var result = new System.Text.StringBuilder();
+        int i = 0;
+        while (i < text.Length)
+        {
+            bool rtl = IsRtlChar(text[i]);
+            int j = i + 1;
+            while (j < text.Length && IsRtlChar(text[j]) == rtl) j++;
+            var segment = text.Substring(i, j - i);
+            if (rtl)
+            {
+                char[] arr = segment.ToCharArray();
+                Array.Reverse(arr);
+                result.Append(arr);
+            }
+            else
+            {
+                result.Append(segment);
+            }
+            i = j;
+        }
+        return result.ToString();
+    }
+
+    /// <summary>
     /// 从 Drawing 提取文本
     /// </summary>
     private IElement? ExtractTextFromDrawing(DocumentFormat.OpenXml.Wordprocessing.Drawing drawing, float pageWidth)
@@ -147,19 +183,11 @@ public class DrawingMLConverter
 
                 // resolve bidi if language is RTL
                 var textContent = textNode.Text;
-                var lang = runPr?.Language?.Val;
-                if (!string.IsNullOrEmpty(lang) &&
-                    (lang.StartsWith("ar", StringComparison.OrdinalIgnoreCase) ||
-                     lang.StartsWith("he", StringComparison.OrdinalIgnoreCase) ||
-                     lang.StartsWith("fa", StringComparison.OrdinalIgnoreCase) ||
-                     lang.StartsWith("ur", StringComparison.OrdinalIgnoreCase)))
-                {
-                    // naive reverse characters
-                    textContent = new string(textContent.Reverse().ToArray());
-                }
+                // run-specific bidi handling: split into runs of same direction and reverse RTL runs
+                textContent = ApplyBasicBidi(textContent, runPr?.Language?.Val);
 
-                // embedded field detection (simple heuristic: contains space and uppercase)
-                if (textContent.IndexOf(' ') > 0 && textContent.Any(char.IsUpper))
+                // embedded field resolution: match typical field pattern of "WORD ..." and call converter
+                if (System.Text.RegularExpressions.Regex.IsMatch(textContent, @"^[A-Z]{2,}\b"))
                 {
                     try
                     {
@@ -190,34 +218,35 @@ public class DrawingMLConverter
                     chunk.Font.Size *= 0.8f;
                 }
 
-                // gradient fill: interpolate first two stops if available
+                // gradient fill: average all defined stops, optionally weighting by position
                 if (runPr?.GradientFill != null)
                 {
                     var stops = runPr.GradientFill.Descendants<DocumentFormat.OpenXml.Drawing.GradientStop>().ToList();
                     if (stops.Count > 0)
                     {
-                        string? clr = null;
-                        if (stops.Count == 1)
+                        long totalWeight = 0;
+                        long sumR = 0, sumG = 0, sumB = 0;
+                        foreach (var st in stops)
                         {
-                            clr = stops[0].Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                            string? clr = st.Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                            if (clr == null) continue;
+                            int v = int.Parse(clr, System.Globalization.NumberStyles.HexNumber);
+                            int r = (v >> 16) & 0xFF;
+                            int g = (v >> 8) & 0xFF;
+                            int b = v & 0xFF;
+                            long pos = st.Position?.Value ?? 0;
+                            long weight = pos > 0 ? pos : 1;
+                            sumR += r * weight;
+                            sumG += g * weight;
+                            sumB += b * weight;
+                            totalWeight += weight;
                         }
-                        else
+                        if (totalWeight > 0)
                         {
-                            var c1 = stops[0].Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
-                            var c2 = stops[1].Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
-                            if (c1 != null && c2 != null)
-                            {
-                                int v1 = int.Parse(c1, System.Globalization.NumberStyles.HexNumber);
-                                int v2 = int.Parse(c2, System.Globalization.NumberStyles.HexNumber);
-                                int r = ((v1 >> 16) & 0xFF + (v2 >> 16) & 0xFF) / 2;
-                                int g = ((v1 >> 8) & 0xFF + (v2 >> 8) & 0xFF) / 2;
-                                int b = ((v1) & 0xFF + (v2) & 0xFF) / 2;
-                                clr = ((r << 16) | (g << 8) | b).ToString("X6");
-                            }
-                        }
-                        if (!string.IsNullOrEmpty(clr))
-                        {
-                            try { chunk.Font.Color = new BaseColor(int.Parse(clr, System.Globalization.NumberStyles.HexNumber)); } catch { }
+                            int r = (int)(sumR / totalWeight);
+                            int g = (int)(sumG / totalWeight);
+                            int b = (int)(sumB / totalWeight);
+                            chunk.Font.Color = new BaseColor(r, g, b);
                         }
                     }
                 }
@@ -226,7 +255,7 @@ public class DrawingMLConverter
                 var cs = runPr?.GetFirstChild<DocumentFormat.OpenXml.Drawing.CharacterSpacing>()?.Val?.Value;
                 if (cs != null && float.TryParse(cs, out var csVal))
                 {
-                    // assume thousandths of a point like in Word
+                    // characterSpacing is in thousandths of a point per OpenXML spec
                     chunk.CharSpacing = csVal / 1000f;
                 }
 
