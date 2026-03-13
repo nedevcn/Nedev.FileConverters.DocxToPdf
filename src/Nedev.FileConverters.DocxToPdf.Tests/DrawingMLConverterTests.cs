@@ -185,5 +185,65 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.IsNotType<FloatingObject>(result);
             }
         }
+
+        [Fact]
+        public void ConvertDrawing_StyledText_RespectsFontAndAlignment()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body());
+
+                var drawing = new DocumentFormat.OpenXml.Wordprocessing.Drawing();
+                var inline = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline();
+                var extent = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = 914400, Cy = 228600 };
+                inline.Append(extent);
+
+                var graphic = new DocumentFormat.OpenXml.Drawing.Graphic();
+                var graphicData = new DocumentFormat.OpenXml.Drawing.GraphicData { Uri = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" };
+                var shape = new DocumentFormat.OpenXml.Drawing.Shape();
+                var txBody = new DocumentFormat.OpenXml.Drawing.TextBody();
+                txBody.Append(new DocumentFormat.OpenXml.Drawing.BodyProperties());
+
+                var para = new DocumentFormat.OpenXml.Drawing.Paragraph();
+                para.Append(new DocumentFormat.OpenXml.Drawing.ParagraphProperties(
+                    new DocumentFormat.OpenXml.Drawing.Alignment { Val = DocumentFormat.OpenXml.Drawing.TextAlignmentTypeValues.Center }
+                ));
+                var run = new DocumentFormat.OpenXml.Drawing.Run();
+                var runPr = new DocumentFormat.OpenXml.Drawing.RunProperties();
+                runPr.FontSize = new DocumentFormat.OpenXml.Drawing.FontSize { Val = 2400 }; // 24pt
+                runPr.Bold = new DocumentFormat.OpenXml.Drawing.Bold();
+                var sc = new DocumentFormat.OpenXml.Drawing.SolidFill(
+                    new DocumentFormat.OpenXml.Drawing.RgbColorModelHex { Val = "00FF00" }
+                );
+                runPr.Append(sc);
+                run.Append(runPr);
+                run.Append(new DocumentFormat.OpenXml.Drawing.Text("Styled"));
+                para.Append(run);
+                txBody.Append(para);
+                shape.Append(txBody);
+                graphicData.Append(shape);
+                graphic.Append(graphicData);
+                inline.Append(graphic);
+                drawing.Append(inline);
+
+                main.Document.Save();
+
+                var options = new ConvertOptions();
+                var fontHelper = new FontHelper(options);
+                var converter = new DrawingMLConverter(doc, fontHelper);
+                var result = converter.ConvertDrawing(drawing, 500f);
+
+                Assert.IsType<iTextParagraph>(result);
+                var pdfPara = (iTextParagraph)result;
+                Assert.Equal(Element.ALIGN_CENTER, pdfPara.Alignment);
+                Assert.Single(pdfPara.Chunks);
+                var chunk = pdfPara.Chunks[0];
+                Assert.Equal(24f, chunk.Font.Size, 2);
+                Assert.True((chunk.Font.Style & iTextFont.BOLD) != 0);
+                Assert.Equal(BaseColor.GREEN, chunk.Font.Color);
+            }
+        }
     }
 }

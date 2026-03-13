@@ -245,6 +245,55 @@ public class FontHelper
         });
     }
 
+    /// <summary>
+    /// Generate a font from DrawingML <see cref="DocumentFormat.OpenXml.Drawing.RunProperties"/>.
+    /// This mirrors the logic used for Wordprocessing run properties but handles the
+    /// different XML classes (latinFont, RgbColorModelHex, etc.).
+    /// </summary>
+    public iTextFont GetFont(DocumentFormat.OpenXml.Drawing.RunProperties? runPr, float? defaultSize = null)
+    {
+        var fontSize = defaultSize ?? _options.DefaultFontSize;
+        int fontStyle = iTextFont.NORMAL;
+        BaseColor? color = null;
+        string? fontName = null;
+
+        if (runPr != null)
+        {
+            if (runPr.FontSize != null && runPr.FontSize.Val.HasValue)
+                fontSize = runPr.FontSize.Val.Value / 100f;
+
+            if (runPr.Bold != null && (runPr.Bold.Val == null || runPr.Bold.Val.Value))
+                fontStyle |= iTextFont.BOLD;
+
+            if (runPr.Italic != null && (runPr.Italic.Val == null || runPr.Italic.Val.Value))
+                fontStyle |= iTextFont.ITALIC;
+
+            // color may be specified as rgb
+            var rgb = runPr.Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+            if (!string.IsNullOrEmpty(rgb))
+            {
+                try
+                {
+                    color = new BaseColor(int.Parse(rgb, System.Globalization.NumberStyles.HexNumber));
+                }
+                catch { }
+            }
+
+            // latin font face
+            var latin = runPr.GetFirstChild<DocumentFormat.OpenXml.Drawing.LatinFont>()?.Typeface?.Value;
+            if (!string.IsNullOrEmpty(latin))
+                fontName = latin;
+        }
+
+        if (fontName != null && _fontNameMap.TryGetValue(fontName, out var mapped))
+            fontName = mapped;
+
+        if (fontName == null)
+            fontName = GetDefaultFontName();
+
+        return FontFactory.GetFont(fontName, fontSize, fontStyle, color ?? BaseColor.Black);
+    }
+
     private static iTextFont? TryGetTrueBoldFont(string fontName, float fontSize, int fontStyle, BaseColor? color)
     {
         try

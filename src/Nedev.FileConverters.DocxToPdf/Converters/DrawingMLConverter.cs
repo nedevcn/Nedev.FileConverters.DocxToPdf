@@ -109,21 +109,47 @@ public class DrawingMLConverter
         var graphicData = drawing.Descendants<DocumentFormat.OpenXml.Drawing.GraphicData>().FirstOrDefault();
         if (graphicData == null) return null;
 
-        // 提取所有文本
-        var texts = graphicData.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
-            .Select(t => t.Text)
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .ToList();
-
-        if (texts.Count == 0) return null;
+        // look for paragraphs inside the graphic; must have at least one run of text
+        var paragraphs = graphicData.Descendants<DocumentFormat.OpenXml.Drawing.Paragraph>().ToList();
+        if (paragraphs.Count == 0) return null;
 
         var pdfPara = new iTextParagraph();
-        var font = _fontHelper.GetFont(12f);
 
-        foreach (var text in texts)
+        foreach (var para in paragraphs)
         {
-            pdfPara.Add(new iTextChunk(text, font));
-            pdfPara.Add(new iTextChunk(" ", font));
+            // determine alignment if specified
+            var align = para.ParagraphProperties?.Alignment?.Value;
+            if (align != null)
+            {
+                switch (align.Value)
+                {
+                    case DocumentFormat.OpenXml.Drawing.TextAlignmentTypeValues.Center:
+                        pdfPara.Alignment = Element.ALIGN_CENTER;
+                        break;
+                    case DocumentFormat.OpenXml.Drawing.TextAlignmentTypeValues.Right:
+                        pdfPara.Alignment = Element.ALIGN_RIGHT;
+                        break;
+                    case DocumentFormat.OpenXml.Drawing.TextAlignmentTypeValues.Justified:
+                        pdfPara.Alignment = Element.ALIGN_JUSTIFIED;
+                        break;
+                    default:
+                        pdfPara.Alignment = Element.ALIGN_LEFT;
+                        break;
+                }
+            }
+
+            foreach (var run in para.Descendants<DocumentFormat.OpenXml.Drawing.Run>())
+            {
+                var textNode = run.GetFirstChild<DocumentFormat.OpenXml.Drawing.Text>();
+                if (textNode == null || string.IsNullOrWhiteSpace(textNode.Text)) continue;
+
+                var runPr = run.GetFirstChild<DocumentFormat.OpenXml.Drawing.RunProperties>();
+                var fontObj = _fontHelper.GetFont(runPr);
+                pdfPara.Add(new iTextChunk(textNode.Text, fontObj));
+            }
+
+            // separate paragraphs with newline
+            pdfPara.Add(Chunk.NEWLINE);
         }
 
         return pdfPara;
