@@ -492,5 +492,48 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.Equal(TextDirection.Vertical, pdfPara.Chunks[0].DirectionOverride);
             }
         }
+
+        [Fact]
+        public void ConvertDrawing_EmbeddingAndNeutralBidi_Works()
+        {
+            // string with embedding and neutral characters
+            string mixed = "abc\u202BDEF\u202C,ghi"; // abc then RTL DEF then comma then ghi
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body());
+
+                var drawing = new DocumentFormat.OpenXml.Wordprocessing.Drawing();
+                var inline = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline();
+                inline.Append(new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = 914400, Cy = 228600 });
+                var graphic = new DocumentFormat.OpenXml.Drawing.Graphic();
+                var graphicData = new DocumentFormat.OpenXml.Drawing.GraphicData { Uri = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" };
+                var shape = new DocumentFormat.OpenXml.Drawing.Shape();
+                var txBody = new DocumentFormat.OpenXml.Drawing.TextBody();
+                txBody.Append(new DocumentFormat.OpenXml.Drawing.BodyProperties());
+
+                var para = new DocumentFormat.OpenXml.Drawing.Paragraph();
+                var run = new DocumentFormat.OpenXml.Drawing.Run();
+                var txt = new DocumentFormat.OpenXml.Drawing.Text(mixed);
+                run.Append(txt);
+                para.Append(run);
+                txBody.Append(para);
+                shape.Append(txBody);
+                graphicData.Append(shape);
+                graphic.Append(graphicData);
+                inline.Append(graphic);
+                drawing.Append(inline);
+
+                main.Document.Save();
+
+                var converter = new DrawingMLConverter(doc, new FontHelper(new ConvertOptions()));
+                var result = converter.ConvertDrawing(drawing, 500f);
+                var pdfPara = (iTextParagraph)result;
+                Assert.Single(pdfPara.Chunks);
+                // expected: abc + reversed DEF + , + ghi
+                Assert.Equal("abcFED,ghi", pdfPara.Chunks[0].Content);
+            }
+        }
     }
 }

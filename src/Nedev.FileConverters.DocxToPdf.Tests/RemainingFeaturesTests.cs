@@ -136,6 +136,38 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             }
         }
 
+        [Fact]
+        public void ResolveField_NestedIf_ResolvesRecursively()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var mainPart = doc.AddMainDocumentPart();
+                mainPart.Document = new Document(new Body());
+                mainPart.Document.Save();
+
+                var converter = new DocxToPdfConverter();
+                var nested = "IF 0=1 no IF 1=1 yes no";
+                Assert.Equal("yes", converter.ResolveField(nested, doc));
+            }
+        }
+
+        [Fact]
+        public void ResolveField_MergefieldWithSwitches_IgnoresSwitches()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var mainPart = doc.AddMainDocumentPart();
+                mainPart.Document = new Document(new Body());
+                mainPart.Document.Save();
+
+                var converter = new DocxToPdfConverter();
+                // unknown mergefield returns null
+                Assert.Null(converter.ResolveField("MERGEFIELD Name \\* Upper", doc));
+            }
+        }
+
         #endregion
 
         #region SmartArt Renderer Tests

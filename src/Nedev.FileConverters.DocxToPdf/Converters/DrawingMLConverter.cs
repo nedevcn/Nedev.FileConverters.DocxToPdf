@@ -272,5 +272,9 @@ public class DrawingMLConverter
                 }
 
                 pdfPara.Add(chunk);
+            }
+        }
+
+        return pdfPara;
     }
 }

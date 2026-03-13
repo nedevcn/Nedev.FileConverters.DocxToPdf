@@ -222,11 +222,19 @@ public class PdfReader : IDisposable
         {
             return _pdfData;
         }
+    }
+
     public void Dispose()
     {
         // ????
     }
 }
+
+/// <summary>
+/// PDF???(???????)
+/// </summary>
+public class PdfStamper : IDisposable
+{
 
 /// <summary>
 /// PDF???(???????)
@@ -415,4 +423,5 @@ public class PdfStamper : IDisposable
     {
         Close();
     }
+}
 }

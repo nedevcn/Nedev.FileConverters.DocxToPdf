@@ -222,6 +222,8 @@ public class ColumnText
                     return NO_MORE_TEXT;
                 return NO_MORE_COLUMN;
             }
+        }
+
     /// 渲染元素
     /// </summary>
     /// <param name="element">元素</param>
@@ -737,7 +739,6 @@ public class ColumnText
 
             _canvas.SetColorFill(chunk.Font.Color);
             var textBaselineY = y - chunk.Font.Size * 0.8f + chunk.TextRise;
-        }
 
             _canvas.BeginText();
             // 使用 chunk 的字体族，确保在 PDF 中已注册
@@ -1219,23 +1220,6 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                         bottomBB = cy - rotHeight / 2f;
                     }
                 }
-            }
-            catch
-            {
-                // ignore and fall back to geometric bbox calculation below
-                if (angle != 0)
-                {
-                    var rad = -angle * Math.PI / 180.0; // match PdfWriter rotation sign
-                    var cos = (float)Math.Cos(rad);
-                    var sin = (float)Math.Sin(rad);
-                    rotWidth = Math.Abs(width * cos) + Math.Abs(height * sin);
-                    rotHeight = Math.Abs(height * cos) + Math.Abs(width * sin);
-                    float cx = left + width / 2f;
-                    float cy = bottom + height / 2f;
-                    leftBB = cx - rotWidth / 2f;
-                    bottomBB = cy - rotHeight / 2f;
-                }
-            }
 
             void addRect(float l, float b, float r, float t)
             {
@@ -1380,3 +1364,5 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
             }
             MergeExclusions();
         }
+}
+}

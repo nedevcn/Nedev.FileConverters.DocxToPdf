@@ -166,10 +166,36 @@ public static class StyleHelper
     {
         if (colorNode == null) return null;
 
+        // direct RGB value
         var directHex = colorNode.Val?.Value;
         var direct = HexToBaseColor(directHex);
         if (direct != null)
             return ApplyTintShade(direct, colorNode.ThemeTint?.Value, colorNode.ThemeShade?.Value);
+
+        // HSL color model
+        var hsl = colorNode.GetFirstChild<DocumentFormat.OpenXml.Drawing.HslColorModelHex>();
+        if (hsl != null)
+        {
+            try
+            {
+                double hue = int.Parse(hsl.Hue?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
+                double sat = int.Parse(hsl.Saturation?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
+                double lum = int.Parse(hsl.Luminance?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
+                var rgb = HslToRgb(hue, sat, lum);
+                return ApplyTintShade(rgb, colorNode.ThemeTint?.Value, colorNode.ThemeShade?.Value);
+            }
+            catch { }
+        }
+
+        // system color (lastColor attribute is fallback hex)
+        var sys = colorNode.GetFirstChild<DocumentFormat.OpenXml.Drawing.SystemColor>();
+        if (sys != null)
+        {
+            var last = sys.LastColor?.Value;
+            var sysColor = HexToBaseColor(last);
+            if (sysColor != null)
+                return ApplyTintShade(sysColor, colorNode.ThemeTint?.Value, colorNode.ThemeShade?.Value);
+        }
 
         var themeKey = MapThemeColorName(colorNode.ThemeColor?.Value.ToString());
         var theme = ResolveSchemeColor(colorScheme, themeKey);
@@ -187,6 +213,16 @@ public static class StyleHelper
         var direct = HexToBaseColor(directHex);
         if (direct != null)
             return ApplyTintShade(direct, shading.ThemeFillTint?.Value, shading.ThemeFillShade?.Value);
+
+        // honor system/HSL in shading as well
+        var sys = shading.GetFirstChild<DocumentFormat.OpenXml.Drawing.SystemColor>();
+        if (sys != null)
+        {
+            var last = sys.LastColor?.Value;
+            var sysColor = HexToBaseColor(last);
+            if (sysColor != null)
+                return ApplyTintShade(sysColor, shading.ThemeFillTint?.Value, shading.ThemeFillShade?.Value);
+        }
 
         var themeKey = MapThemeColorName(shading.ThemeFill?.Value.ToString());
         var theme = ResolveSchemeColor(colorScheme, themeKey);
@@ -302,5 +338,36 @@ public static class StyleHelper
         // ???????: (0.299*R + 0.587*G + 0.114*B)
         double luminance = (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) / 255.0;
         return luminance < 0.5;
+    }
+
+    /// <summary>
+    /// Convert normalized HSL values (0-1) to BaseColor RGB.
+    /// </summary>
+    private static BaseColor HslToRgb(double h, double s, double l)
+    {
+        double r, g, b;
+        if (s == 0)
+        {
+            r = g = b = l;
+        }
+        else
+        {
+            double hue2rgb(double p, double q, double t)
+            {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1.0/6.0) return p + (q - p) * 6 * t;
+                if (t < 1.0/2.0) return q;
+                if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6;
+                return p;
+            }
+
+            double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            double p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1.0/3.0);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1.0/3.0);
+        }
+        return new BaseColor((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
     }
 }
