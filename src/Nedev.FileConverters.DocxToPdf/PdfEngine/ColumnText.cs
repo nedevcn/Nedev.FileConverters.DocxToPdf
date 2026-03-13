@@ -1097,22 +1097,71 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                 }
             }
 
-            // compute bounding box of rotated image (if any) and offsets for mask
+            // if object is simply in front/behind text, we don't create exclusions; text flows through
+            if (fobj.Wrapping == WrappingStyle.BehindText || fobj.Wrapping == WrappingStyle.InFrontOfText)
+            {
+                return;
+            }
+
+            // compute tight bounding box of opaque pixels (after rotation) to avoid large empty areas
             float rotWidth = width;
             float rotHeight = height;
             float leftBB = left;
             float bottomBB = bottom;
-            if (angle != 0)
+            try
             {
-                var rad = -angle * Math.PI / 180.0; // match PdfWriter rotation sign
-                var cos = (float)Math.Cos(rad);
-                var sin = (float)Math.Sin(rad);
-                rotWidth = Math.Abs(width * cos) + Math.Abs(height * sin);
-                rotHeight = Math.Abs(height * cos) + Math.Abs(width * sin);
-                float cx = left + width / 2f;
-                float cy = bottom + height / 2f;
-                leftBB = cx - rotWidth / 2f;
-                bottomBB = cy - rotHeight / 2f;
+                var png = img.GetPngData();
+                using var ms2 = new MemoryStream(png);
+                using var codec2 = SkiaSharp.SKCodec.Create(ms2);
+                if (codec2 != null)
+                {
+                    using var bmpMask = SkiaSharp.SKBitmap.Decode(codec2);
+                    if (bmpMask != null)
+                    {
+                        SkiaSharp.SKBitmap mask = bmpMask;
+                        if (angle != 0)
+                            mask = RotateBitmap(bmpMask, angle);
+                        float scaleX = width / mask.Width;
+                        float scaleY = height / mask.Height;
+                        int minpx = mask.Width, maxpx = -1, minpy = mask.Height, maxpy = -1;
+                        for (int py = 0; py < mask.Height; py++)
+                        {
+                            for (int px = 0; px < mask.Width; px++)
+                            {
+                                if (mask.GetPixel(px, py).Alpha > 10)
+                                {
+                                    minpx = Math.Min(minpx, px);
+                                    maxpx = Math.Max(maxpx, px);
+                                    minpy = Math.Min(minpy, py);
+                                    maxpy = Math.Max(maxpy, py);
+                                }
+                            }
+                        }
+                        if (maxpx >= 0)
+                        {
+                            rotWidth = (maxpx - minpx + 1) * scaleX;
+                            rotHeight = (maxpy - minpy + 1) * scaleY;
+                            leftBB = left + minpx * scaleX;
+                            bottomBB = bottom + (mask.Height - maxpy - 1) * scaleY;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore and fall back to geometric bbox calculation below
+                if (angle != 0)
+                {
+                    var rad = -angle * Math.PI / 180.0; // match PdfWriter rotation sign
+                    var cos = (float)Math.Cos(rad);
+                    var sin = (float)Math.Sin(rad);
+                    rotWidth = Math.Abs(width * cos) + Math.Abs(height * sin);
+                    rotHeight = Math.Abs(height * cos) + Math.Abs(width * sin);
+                    float cx = left + width / 2f;
+                    float cy = bottom + height / 2f;
+                    leftBB = cx - rotWidth / 2f;
+                    bottomBB = cy - rotHeight / 2f;
+                }
             }
 
             void addRect(float l, float b, float r, float t)
