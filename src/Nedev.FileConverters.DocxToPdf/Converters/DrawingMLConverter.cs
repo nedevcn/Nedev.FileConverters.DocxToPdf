@@ -144,8 +144,34 @@ public class DrawingMLConverter
                 if (textNode == null || string.IsNullOrWhiteSpace(textNode.Text)) continue;
 
                 var runPr = run.GetFirstChild<DocumentFormat.OpenXml.Drawing.RunProperties>();
+
+                // resolve bidi if language is RTL
+                var textContent = textNode.Text;
+                var lang = runPr?.Language?.Val;
+                if (!string.IsNullOrEmpty(lang) &&
+                    (lang.StartsWith("ar", StringComparison.OrdinalIgnoreCase) ||
+                     lang.StartsWith("he", StringComparison.OrdinalIgnoreCase) ||
+                     lang.StartsWith("fa", StringComparison.OrdinalIgnoreCase) ||
+                     lang.StartsWith("ur", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // naive reverse characters
+                    textContent = new string(textContent.Reverse().ToArray());
+                }
+
+                // embedded field detection (simple heuristic: contains space and uppercase)
+                if (textContent.IndexOf(' ') > 0 && textContent.Any(char.IsUpper))
+                {
+                    try
+                    {
+                        var resolved = new DocxToPdfConverter().ResolveField(textContent, _document, "");
+                        if (resolved != null)
+                            textContent = resolved;
+                    }
+                    catch { }
+                }
+
                 var fontObj = _fontHelper.GetFont(runPr);
-                var chunk = new iTextChunk(textNode.Text, fontObj);
+                var chunk = new iTextChunk(textContent, fontObj);
 
                 // underline/strike
                 if (runPr?.Underline != null && runPr.Underline.Val != DocumentFormat.OpenXml.Drawing.TextUnderlineValues.None)
@@ -164,19 +190,45 @@ public class DrawingMLConverter
                     chunk.Font.Size *= 0.8f;
                 }
 
-                // color gradient: choose first stop if gradient fill present
+                // gradient fill: interpolate first two stops if available
                 if (runPr?.GradientFill != null)
                 {
-                    var stop = runPr.GradientFill.Descendants<DocumentFormat.OpenXml.Drawing.GradientStop>().FirstOrDefault();
-                    var clr = stop?.Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
-                    if (!string.IsNullOrEmpty(clr))
+                    var stops = runPr.GradientFill.Descendants<DocumentFormat.OpenXml.Drawing.GradientStop>().ToList();
+                    if (stops.Count > 0)
                     {
-                        try { chunk.Font.Color = new BaseColor(int.Parse(clr, System.Globalization.NumberStyles.HexNumber)); } catch { }
+                        string? clr = null;
+                        if (stops.Count == 1)
+                        {
+                            clr = stops[0].Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                        }
+                        else
+                        {
+                            var c1 = stops[0].Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                            var c2 = stops[1].Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                            if (c1 != null && c2 != null)
+                            {
+                                int v1 = int.Parse(c1, System.Globalization.NumberStyles.HexNumber);
+                                int v2 = int.Parse(c2, System.Globalization.NumberStyles.HexNumber);
+                                int r = ((v1 >> 16) & 0xFF + (v2 >> 16) & 0xFF) / 2;
+                                int g = ((v1 >> 8) & 0xFF + (v2 >> 8) & 0xFF) / 2;
+                                int b = ((v1) & 0xFF + (v2) & 0xFF) / 2;
+                                clr = ((r << 16) | (g << 8) | b).ToString("X6");
+                            }
+                        }
+                        if (!string.IsNullOrEmpty(clr))
+                        {
+                            try { chunk.Font.Color = new BaseColor(int.Parse(clr, System.Globalization.NumberStyles.HexNumber)); } catch { }
+                        }
                     }
                 }
 
-                // TODO: character spacing (kerning/tracking) could be applied here when
-                // DrawingML defines it; would require a new property on Chunk or Font.
+                // character spacing if defined
+                var cs = runPr?.GetFirstChild<DocumentFormat.OpenXml.Drawing.CharacterSpacing>()?.Val?.Value;
+                if (cs != null && float.TryParse(cs, out var csVal))
+                {
+                    // assume thousandths of a point like in Word
+                    chunk.CharSpacing = csVal / 1000f;
+                }
 
                 pdfPara.Add(chunk);
     }

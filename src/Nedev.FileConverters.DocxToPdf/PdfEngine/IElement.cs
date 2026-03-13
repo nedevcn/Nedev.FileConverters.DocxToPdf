@@ -48,6 +48,10 @@ public class Chunk : IElement
     public bool HasUnderline { get; set; }
     public float UnderlineThickness { get; set; } = 0.1f;
     public float UnderlineYPosition { get; set; } = -1f;
+    /// <summary>
+    /// Additional tracking/character spacing (points) applied between glyphs.
+    /// </summary>
+    public float CharSpacing { get; set; }
 
     /// <summary>
     /// Optional override for the text direction of this chunk.  If null, the
@@ -107,6 +111,7 @@ public class Chunk : IElement
     /// </summary>
     public float GetAdvance(TextDirection direction)
     {
+        float baseAdvance;
         if (direction == TextDirection.Vertical)
         {
             float adv = 0;
@@ -115,9 +120,16 @@ public class Chunk : IElement
                 // each glyph advances by font size (approximate)
                 adv += Font.Size;
             }
-            return adv;
+            baseAdvance = adv;
         }
-        return GetWidth();
+        else
+        {
+            baseAdvance = GetWidth();
+        }
+        // add character spacing between each glyph (n-1 gaps)
+        if (CharSpacing != 0 && Content.Length > 1)
+            baseAdvance += CharSpacing * (Content.Length - 1);
+        return baseAdvance;
     }
 }
 

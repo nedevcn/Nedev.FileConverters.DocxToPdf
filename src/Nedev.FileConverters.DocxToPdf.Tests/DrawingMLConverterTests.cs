@@ -335,7 +335,69 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.Equal("SMALLCAPS", chunk.Content);
                 // size should be reduced
                 Assert.True(chunk.Font.Size < options.DefaultFontSize);
-                Assert.Equal(new BaseColor(0xFF,0x00,0x00), chunk.Font.Color);
+                Assert.Equal(new BaseColor(0x7F,0x00,0x7F), chunk.Font.Color); // average of red/blue
+            }
+        }
+
+        [Fact]
+        public void ConvertDrawing_CharSpacing_BidiAndField_AreApplied()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body());
+                // declare a document variable
+                var settings = main.AddNewPart<DocumentSettingsPart>();
+                settings.Settings = new Settings(
+                    new DocumentVariables(
+                        new DocumentVariable { Name="Foo", Val="Bar" }
+                    )
+                );
+
+                var drawing = new DocumentFormat.OpenXml.Wordprocessing.Drawing();
+                var inline = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline();
+                var extent = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = 914400, Cy = 228600 };
+                inline.Append(extent);
+                var graphic = new DocumentFormat.OpenXml.Drawing.Graphic();
+                var graphicData = new DocumentFormat.OpenXml.Drawing.GraphicData { Uri = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" };
+                var shape = new DocumentFormat.OpenXml.Drawing.Shape();
+                var txBody = new DocumentFormat.OpenXml.Drawing.TextBody();
+                txBody.Append(new DocumentFormat.OpenXml.Drawing.BodyProperties());
+
+                var para = new DocumentFormat.OpenXml.Drawing.Paragraph();
+                var run = new DocumentFormat.OpenXml.Drawing.Run();
+                var runPr = new DocumentFormat.OpenXml.Drawing.RunProperties();
+                // set char spacing 2000 units (2pt assumed)
+                runPr.CharacterSpacing = new DocumentFormat.OpenXml.Drawing.CharacterSpacing { Val = 2000 };
+                runPr.Language = new DocumentFormat.OpenXml.Drawing.Language { Val = "ar-SA" };
+                run.Append(runPr);
+                run.Append(new DocumentFormat.OpenXml.Drawing.Text("Foo"));
+                para.Append(run);
+                txBody.Append(para);
+                shape.Append(txBody);
+                graphicData.Append(shape);
+                graphic.Append(graphicData);
+                inline.Append(graphic);
+                drawing.Append(inline);
+
+                main.Document.Save();
+
+                var options = new ConvertOptions();
+                var fontHelper = new FontHelper(options);
+                var converter = new DrawingMLConverter(doc, fontHelper);
+                var result = converter.ConvertDrawing(drawing, 500f);
+
+                var pdfPara = (iTextParagraph)result;
+                var chunk = pdfPara.Chunks[0];
+                // bidi reversed 'Foo'->'ooF'
+                Assert.Equal("ooF", chunk.Content);
+                // char spacing set properly
+                Assert.InRange(chunk.CharSpacing, 1.9f, 2.1f);
+
+                // verify field resolution: since chunk.Text started as Foo (variable name)
+                // ResolveField should have replaced it earlier; value now 'Bar'
+                Assert.Contains("Bar", chunk.Content);
             }
         }
     }
