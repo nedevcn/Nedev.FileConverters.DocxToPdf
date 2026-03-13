@@ -15,6 +15,14 @@ public class ColumnText
     /// Number of entries in the image mask cache. Visible for unit tests.
     /// </summary>
     internal static int MaskCacheCount => _maskCache.Count;
+
+    /// <summary>
+    /// Clears all entries from the mask cache. Useful when memory pressure or during testing.
+    /// </summary>
+    public static void ClearMaskCache()
+    {
+        _maskCache.Clear();
+    }
     private readonly PdfContentByte _canvas;
     private readonly List<IElement> _elements = [];
 
@@ -1137,9 +1145,10 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                             {
                                 SKBitmap bmp;
                                 // if angle==0 we can cache original, otherwise rotated version
+                                // include final rendered dimensions to distinguish pre‑scaled images
                                 var cacheKey = img.ImageData != null
-                                    ? $"{img.ImageData.Length}_{angle}"
-                                    : $"{bmpOrig.Width}x{bmpOrig.Height}_{angle}";
+                                    ? $"{img.ImageData.Length}_{img.ScaledWidth}x{img.ScaledHeight}_{angle}"
+                                    : $"{bmpOrig.Width}x{bmpOrig.Height}_{img.ScaledWidth}x{img.ScaledHeight}_{angle}";
                                 if (!_maskCache.TryGetValue(cacheKey, out bmp))
                                 {
                                     bmp = bmpOrig;

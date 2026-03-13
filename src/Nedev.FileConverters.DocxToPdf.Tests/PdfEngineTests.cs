@@ -407,8 +407,7 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         [Fact]
         public void FloatingObject_MaskBitmapIsCached()
         {
-            // clear any existing cache
-            typeof(ColumnText).GetProperty("MaskCacheCount", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.GetValue(null); // just to ensure property exists
+            ColumnText.ClearMaskCache();
             // create two column texts with identical image and rotation
             using var bmp = new SkiaSharp.SKBitmap(5,5);
             using var cnv = new SkiaSharp.SKCanvas(bmp);
@@ -439,14 +438,26 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             ct1.SetSimpleColumn(0,0,100,100);
             ct1.AddElement(obj1);
             ct1.Go(false);
-            var cb2 = new PdfContentByte();
-            var ct2 = new ColumnText(cb2);
-            ct2.SetSimpleColumn(0,0,100,100);
-            ct2.AddElement(obj2);
-            ct2.Go(false);
-            // after two layouts the underlying cache should contain a single entry
-            int count = ColumnText.MaskCacheCount;
-            Assert.Equal(1, count);
+            var firstCount = ColumnText.MaskCacheCount;
+            Assert.Equal(1, firstCount);
+            // layout a scaled version of same image; should create second entry because dimensions differ
+            img.ScaleToFit(10,10);
+            var obj3 = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img!)
+            {
+                Wrapping = WrappingStyle.Tight,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 0
+            };
+            var cb3 = new PdfContentByte();
+            var ct3 = new ColumnText(cb3);
+            ct3.SetSimpleColumn(0,0,100,100);
+            ct3.AddElement(obj3);
+            ct3.Go(false);
+            Assert.Equal(2, ColumnText.MaskCacheCount);
+            // clear cache and ensure count resets
+            ColumnText.ClearMaskCache();
+            Assert.Equal(0, ColumnText.MaskCacheCount);
         }
 
         [Fact]
