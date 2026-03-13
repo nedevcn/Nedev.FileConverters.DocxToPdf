@@ -449,5 +449,48 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.Equal("גבא", pdfPara.Chunks[1].Content);
             }
         }
+
+        [Fact]
+        public void ConvertDrawing_VerticalRun_RespectsOverride()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body());
+
+                var drawing = new DocumentFormat.OpenXml.Wordprocessing.Drawing();
+                var inline = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline();
+                inline.Append(new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = 914400, Cy = 228600 });
+                var graphic = new DocumentFormat.OpenXml.Drawing.Graphic();
+                var graphicData = new DocumentFormat.OpenXml.Drawing.GraphicData { Uri = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" };
+                var shape = new DocumentFormat.OpenXml.Drawing.Shape();
+                var txBody = new DocumentFormat.OpenXml.Drawing.TextBody();
+                txBody.Append(new DocumentFormat.OpenXml.Drawing.BodyProperties());
+
+                var para = new DocumentFormat.OpenXml.Drawing.Paragraph();
+                var run = new DocumentFormat.OpenXml.Drawing.Run();
+                var runPr = new DocumentFormat.OpenXml.Drawing.RunProperties();
+                // add dummy vertical attribute
+                runPr.SetAttribute(new OpenXmlAttribute("a", "vert", "http://schemas.openxmlformats.org/drawingml/2006/main", "1"));
+                run.Append(runPr);
+                run.Append(new DocumentFormat.OpenXml.Drawing.Text("VT"));
+                para.Append(run);
+                txBody.Append(para);
+                shape.Append(txBody);
+                graphicData.Append(shape);
+                graphic.Append(graphicData);
+                inline.Append(graphic);
+                drawing.Append(inline);
+
+                main.Document.Save();
+
+                var converter = new DrawingMLConverter(doc, new FontHelper(new ConvertOptions()));
+                var result = converter.ConvertDrawing(drawing, 500f);
+                var pdfPara = (iTextParagraph)result;
+                Assert.Single(pdfPara.Chunks);
+                Assert.Equal(TextDirection.Vertical, pdfPara.Chunks[0].DirectionOverride);
+            }
+        }
     }
 }

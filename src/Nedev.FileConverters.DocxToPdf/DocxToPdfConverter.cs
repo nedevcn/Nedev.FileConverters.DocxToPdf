@@ -779,6 +779,34 @@ public class DocxToPdfConverter : IFileConverter
             case "SECTIONPAGES":
                 // 节相关字段，需要节追踪器
                 return null;
+            case "IF":
+                // simple IF evaluation: IF <expr> <trueText> <falseText>
+                if (parts.Length >= 4)
+                {
+                    var expr = parts[1];
+                    var trueText = parts[2];
+                    var falseText = parts.Length >= 5 ? parts[3] : string.Empty;
+                    bool result;
+                    // support equality like 1=1 or VAR=Value
+                    var eqIdx = expr.IndexOf('=');
+                    if (eqIdx > 0)
+                    {
+                        var left = expr.Substring(0, eqIdx);
+                        var right = expr.Substring(eqIdx + 1);
+                        // try numeric compare
+                        if (double.TryParse(left, out var lf) && double.TryParse(right, out var rf))
+                            result = lf == rf;
+                        else
+                            result = string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+                    }
+                    else
+                    {
+                        result = !string.IsNullOrEmpty(expr);
+                    }
+                    return result ? trueText : falseText;
+                }
+                return null;
+                return null;
                 
             case "REF":
                 // 交叉引用书签

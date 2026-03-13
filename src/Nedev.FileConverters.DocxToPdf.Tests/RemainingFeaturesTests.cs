@@ -119,6 +119,23 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             }
         }
 
+        [Fact]
+        public void ResolveField_IfField_EvaluatesTrueAndFalse()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var mainPart = doc.AddMainDocumentPart();
+                mainPart.Document = new Document(new Body());
+                mainPart.Document.Save();
+
+                var converter = new DocxToPdfConverter();
+                Assert.Equal("yes", converter.ResolveField("IF 1=1 yes no", doc));
+                Assert.Equal("no", converter.ResolveField("IF 2=1 yes no", doc));
+                Assert.Equal("Bar", converter.ResolveField("IF Foo=Foo yes no", doc));
+            }
+        }
+
         #endregion
 
         #region SmartArt Renderer Tests

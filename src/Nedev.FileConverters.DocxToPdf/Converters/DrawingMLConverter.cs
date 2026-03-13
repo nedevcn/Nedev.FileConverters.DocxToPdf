@@ -200,6 +200,18 @@ public class DrawingMLConverter
 
                 var fontObj = _fontHelper.GetFont(runPr);
                 var chunk = new iTextChunk(textContent, fontObj);
+                // detect anything mentioning vertical to override direction
+                if (runPr != null && runPr.AnyAttrs)
+                {
+                    foreach (var attr in runPr.GetAttributes())
+                    {
+                        if (attr.LocalName.Contains("vert", StringComparison.OrdinalIgnoreCase))
+                        {
+                            chunk.DirectionOverride = TextDirection.Vertical;
+                            break;
+                        }
+                    }
+                }
 
                 // underline/strike
                 if (runPr?.Underline != null && runPr.Underline.Val != DocumentFormat.OpenXml.Drawing.TextUnderlineValues.None)
