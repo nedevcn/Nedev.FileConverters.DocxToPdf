@@ -373,6 +373,38 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void FloatingObject_RelativeSquareWrapAddsAtComputedPosition()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0, 0, 100, 100);
+            using var bmp = new SkiaSharp.SKBitmap(10,10);
+            using var cnv = new SkiaSharp.SKCanvas(bmp);
+            cnv.Clear(SkiaSharp.SKColors.Green);
+            using var im = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var d = im.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = d.ToArray();
+            var img2 = PdfEngine.Image.GetInstance(bytes);
+            Assert.NotNull(img2);
+            // image's own absolute position is irrelevant when float is relative
+            img2.SetAbsolutePosition(0, 0);
+
+            var floatObj = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img2!)
+            {
+                Wrapping = WrappingStyle.Square,
+                PositionIsAbsolute = false,
+                Left = 20,
+                Top = 10
+            };
+            ct.AddElement(floatObj);
+            ct.Go(false);
+            Assert.Single(ct.Exclusions);
+            var rect = ct.Exclusions[0];
+            Assert.Equal(20f, rect.Left, 1);
+            Assert.Equal(80f, rect.Bottom, 1); // 100 - Top(10) - height(10)
+        }
+
+        [Fact]
         public void FloatingObject_TightWrapUsesShape()
         {
             var cb2 = new PdfContentByte();

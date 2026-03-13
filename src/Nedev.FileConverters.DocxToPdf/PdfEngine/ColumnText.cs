@@ -94,7 +94,10 @@ public class ColumnText
                 if (element is global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj &&
                     fobj.Wrapping != WrappingStyle.Inline)
                 {
-                    AddExclusionForFloating(fobj);
+                    // compute current inline/block positions as will be passed to RenderElement
+                    float startInline = TextDirection == TextDirection.Vertical ? _ury : _llx;
+                    float startBlock = _yLine;
+                    AddExclusionForFloating(fobj, startInline, startBlock);
                 }
 
                 bool boundaryHit = false;
@@ -1047,17 +1050,36 @@ public class ColumnText
     /// Add an exclusion rectangle for a floating object so text wraps around it.
     /// Only objects with absolute positioning are considered.
     /// </summary>
-    private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj)
-    {
-        if (!fobj.PositionIsAbsolute) return;
-        var img = fobj.Image;
-        if (!img.HasAbsolutePosition) return;
+private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj, float startInline, float startBlock)
+        {
+            var img = fobj.Image;
+            if (!img.HasAbsolutePosition && fobj.PositionIsAbsolute)
+                return; // can't compute coordinates without absolute image
 
-        float left = img.AbsoluteX;
-        float bottom = img.AbsoluteY;
-        float width = fobj.Width;
-        float height = fobj.Height;
+            float left, bottom;
+            float width = fobj.Width;
+            float height = fobj.Height;
             float angle = img.RotationAngle;
+
+            if (fobj.PositionIsAbsolute)
+            {
+                left = img.AbsoluteX;
+                bottom = img.AbsoluteY;
+            }
+            else
+            {
+                if (TextDirection == TextDirection.Vertical)
+                {
+                    // vertical text: startBlock==x origin, startInline==y origin
+                    left = startBlock - width - fobj.Left;
+                    bottom = startInline - fobj.Top - height;
+                }
+                else
+                {
+                    left = fobj.Left;
+                    bottom = startBlock - fobj.Top - height;
+                }
+            }
 
             // compute bounding box of rotated image (if any) and offsets for mask
             float rotWidth = width;
