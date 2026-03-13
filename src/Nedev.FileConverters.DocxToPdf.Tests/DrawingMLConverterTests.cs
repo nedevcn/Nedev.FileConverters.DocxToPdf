@@ -210,17 +210,30 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 para.Append(new DocumentFormat.OpenXml.Drawing.ParagraphProperties(
                     new DocumentFormat.OpenXml.Drawing.Alignment { Val = DocumentFormat.OpenXml.Drawing.TextAlignmentTypeValues.Center }
                 ));
-                var run = new DocumentFormat.OpenXml.Drawing.Run();
-                var runPr = new DocumentFormat.OpenXml.Drawing.RunProperties();
-                runPr.FontSize = new DocumentFormat.OpenXml.Drawing.FontSize { Val = 2400 }; // 24pt
-                runPr.Bold = new DocumentFormat.OpenXml.Drawing.Bold();
-                var sc = new DocumentFormat.OpenXml.Drawing.SolidFill(
+                
+                // first run: bold green 24pt
+                var run1 = new DocumentFormat.OpenXml.Drawing.Run();
+                var runPr1 = new DocumentFormat.OpenXml.Drawing.RunProperties();
+                runPr1.FontSize = new DocumentFormat.OpenXml.Drawing.FontSize { Val = 2400 };
+                runPr1.Bold = new DocumentFormat.OpenXml.Drawing.Bold();
+                runPr1.Append(new DocumentFormat.OpenXml.Drawing.SolidFill(
                     new DocumentFormat.OpenXml.Drawing.RgbColorModelHex { Val = "00FF00" }
-                );
-                runPr.Append(sc);
-                run.Append(runPr);
-                run.Append(new DocumentFormat.OpenXml.Drawing.Text("Styled"));
-                para.Append(run);
+                ));
+                run1.Append(runPr1);
+                run1.Append(new DocumentFormat.OpenXml.Drawing.Text("Styled"));
+                para.Append(run1);
+
+                // second run: italic, underline, SimSun font
+                var run2 = new DocumentFormat.OpenXml.Drawing.Run();
+                var runPr2 = new DocumentFormat.OpenXml.Drawing.RunProperties();
+                runPr2.Italic = new DocumentFormat.OpenXml.Drawing.Italic();
+                runPr2.Underline = new DocumentFormat.OpenXml.Drawing.TextUnderline { Val = DocumentFormat.OpenXml.Drawing.TextUnderlineValues.Single };
+                var latin = new DocumentFormat.OpenXml.Drawing.LatinFont { Typeface = "SimSun" };
+                runPr2.Append(latin);
+                run2.Append(runPr2);
+                run2.Append(new DocumentFormat.OpenXml.Drawing.Text(" ItalicUnder"));
+                para.Append(run2);
+
                 txBody.Append(para);
                 shape.Append(txBody);
                 graphicData.Append(shape);
@@ -238,11 +251,29 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.IsType<iTextParagraph>(result);
                 var pdfPara = (iTextParagraph)result;
                 Assert.Equal(Element.ALIGN_CENTER, pdfPara.Alignment);
-                Assert.Single(pdfPara.Chunks);
-                var chunk = pdfPara.Chunks[0];
-                Assert.Equal(24f, chunk.Font.Size, 2);
-                Assert.True((chunk.Font.Style & iTextFont.BOLD) != 0);
-                Assert.Equal(BaseColor.GREEN, chunk.Font.Color);
+                Assert.Equal(2, pdfPara.Chunks.Count);
+
+                var c1 = pdfPara.Chunks[0];
+                Assert.Equal(24f, c1.Font.Size, 2);
+                Assert.True((c1.Font.Style & iTextFont.BOLD) != 0);
+                Assert.Equal(BaseColor.GREEN, c1.Font.Color);
+
+                var c2 = pdfPara.Chunks[1];
+                Assert.True((c2.Font.Style & iTextFont.ITALIC) != 0);
+                Assert.True(c2.HasUnderline);
+                Assert.Contains("SimSun", c2.Font.FamilyName, StringComparison.OrdinalIgnoreCase);
+
+                // also check pdf stream contains italic indicator and SimSun font name
+                using var outStream = new MemoryStream();
+                var writer = new PdfWriter(outStream);
+                var ct = new ColumnText(writer.DirectContent);
+                ct.SetSimpleColumn(0, 0, 500, 500);
+                ct.AddElement(pdfPara);
+                ct.Go();
+                var pdfText = System.Text.Encoding.ASCII.GetString(outStream.ToArray());
+                Assert.Contains("SimSun", pdfText, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("Italic", pdfText, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("underline", pdfText, StringComparison.OrdinalIgnoreCase);
             }
         }
     }

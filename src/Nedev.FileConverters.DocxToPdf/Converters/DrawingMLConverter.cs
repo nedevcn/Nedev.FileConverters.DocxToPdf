@@ -145,13 +145,20 @@ public class DrawingMLConverter
 
                 var runPr = run.GetFirstChild<DocumentFormat.OpenXml.Drawing.RunProperties>();
                 var fontObj = _fontHelper.GetFont(runPr);
-                pdfPara.Add(new iTextChunk(textNode.Text, fontObj));
-            }
+                var chunk = new iTextChunk(textNode.Text, fontObj);
 
-            // separate paragraphs with newline
-            pdfPara.Add(Chunk.NEWLINE);
-        }
+                // underline/strike
+                if (runPr?.Underline != null && runPr.Underline.Val != DocumentFormat.OpenXml.Drawing.TextUnderlineValues.None)
+                {
+                    // simple default thickness/position
+                    chunk.SetUnderline(0.1f, -1f);
+                }
+                if (runPr?.Strike != null)
+                {
+                    // strikethrough is just font style in iText
+                    chunk.Font.Style |= iTextFont.STRIKETHRU;
+                }
 
-        return pdfPara;
+                pdfPara.Add(chunk);
     }
 }
