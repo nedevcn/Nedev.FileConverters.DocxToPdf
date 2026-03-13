@@ -141,5 +141,49 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.NotNull(result);
             }
         }
+
+        [Fact]
+        public void ConvertDrawing_AnchoredShapeWithText_ReturnsParagraphElement()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var mainPart = doc.AddMainDocumentPart();
+                mainPart.Document = new Document(new Body());
+
+                // create a drawing that is anchored rather than inline
+                var drawing = new DocumentFormat.OpenXml.Wordprocessing.Drawing();
+                var anchor = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Anchor();
+                var extent = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = 1371600, Cy = 457200 };
+                anchor.Append(extent);
+
+                var graphic = new DocumentFormat.OpenXml.Drawing.Graphic();
+                var graphicData = new DocumentFormat.OpenXml.Drawing.GraphicData { Uri = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" };
+                var shape = new DocumentFormat.OpenXml.Drawing.Shape();
+                var txBody = new DocumentFormat.OpenXml.Drawing.TextBody();
+                txBody.Append(new DocumentFormat.OpenXml.Drawing.BodyProperties());
+
+                var para = new DocumentFormat.OpenXml.Drawing.Paragraph();
+                var run = new DocumentFormat.OpenXml.Drawing.Run();
+                run.Append(new DocumentFormat.OpenXml.Drawing.Text("Anchored text"));
+                para.Append(run);
+                txBody.Append(para);
+                shape.Append(txBody);
+                graphicData.Append(shape);
+                graphic.Append(graphicData);
+                anchor.Append(graphic);
+                drawing.Append(anchor);
+
+                mainPart.Document.Save();
+
+                var options = new ConvertOptions();
+                var fontHelper = new FontHelper(options);
+                var converter = new DrawingMLConverter(doc, fontHelper);
+                var result = converter.ConvertDrawing(drawing, 500f);
+                Assert.NotNull(result);
+                // anchored element should not be floating object
+                Assert.IsNotType<FloatingObject>(result);
+            }
+        }
     }
 }

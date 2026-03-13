@@ -291,10 +291,11 @@ public class ImageConverter
         }
         else if (_drawingRasterizer.CanRasterize(anchor))
         {
-            // TODO: some anchors (textboxes/SmartArt) contain text that could be
-            // converted into actual Paragraph/Chunk elements instead of rasterized
-            // images. Doing so would preserve text clarity and allow wrapping
-            // around individual words. For now we rasterize everything.
+            // in most cases drawings with purely textual content are handled by
+            // DrawingMLConverter.ConvertDrawing before we reach this point, so the
+            // TODO from earlier is largely resolved. anchors containing mixed
+            // graphics/text or complex SmartArt still fall through here and are
+            // rasterized for simplicity.
             var (pxW, pxH) = EstimatePixelSize(extent, pageWidth);
             var (png, mask) = _drawingRasterizer.RasterizeToPng(anchor, pxW, pxH);
             if (png != null)

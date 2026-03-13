@@ -34,6 +34,20 @@ public class DrawingMLConverter
     {
         try
         {
+            // if the drawing contains text but no embedded picture we prefer returning
+            // a paragraph rather than rasterizing the whole graphic. this covers
+            // textboxes and many SmartArt nodes where the visual content is
+            // purely textual.
+            bool hasText = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
+                                .Any(t => !string.IsNullOrWhiteSpace(t.Text));
+            bool hasBlip = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Blip>().Any();
+            if (hasText && !hasBlip)
+            {
+                var textElem = ExtractTextFromDrawing(drawing, pageWidth);
+                if (textElem != null)
+                    return textElem;
+            }
+
             // 首先尝试使用 SkiaSharp 渲染器渲染为图片
             var extent = drawing.Descendants<DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent>().FirstOrDefault();
             if (extent != null)
