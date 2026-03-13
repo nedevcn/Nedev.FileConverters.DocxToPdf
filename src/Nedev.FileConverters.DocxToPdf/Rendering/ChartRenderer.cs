@@ -16,6 +16,52 @@ public class ChartRenderer
     private readonly WordprocessingDocument _document;
     private readonly ConvertOptions _options;
 
+    private const float DefaultInsetFraction = 0.1f;
+
+    /// <summary>
+    /// Compute mask bounds from parsed chart data.
+    /// </summary>
+    public SkiaSharp.SKRect? ComputeMaskBounds(ChartData data, int pixelWidth, int pixelHeight)
+    {
+        if (data == null) return null;
+        float insetX = pixelWidth * DefaultInsetFraction;
+        float insetY = pixelHeight * DefaultInsetFraction;
+        float bottomInset = insetY;
+        float topInset = insetY;
+        if (data.Series != null && data.Series.Count > 0 &&
+            (data.ChartType == ChartType.Line || data.ChartType == ChartType.Area || data.ChartType == ChartType.Scatter))
+        {
+            var allVals = data.Series.SelectMany(s => s.Values).ToList();
+            if (allVals.Count > 0)
+            {
+                double yMin = allVals.Min();
+                double yMax = allVals.Max();
+                if (yMax > 0)
+                {
+                    bottomInset += (float)(yMin / (yMax + 1e-6) * pixelHeight * 0.2);
+                }
+                if (yMax < 0.2 * allVals.Average())
+                {
+                    topInset += pixelHeight * 0.05f;
+                }
+            }
+        }
+        return new SkiaSharp.SKRect(bottomInset, bottomInset, pixelWidth - insetX, pixelHeight - topInset);
+    }
+
+    /// <summary>
+    /// Utility that extracts data from chartElement and computes mask.
+    /// </summary>
+    public SkiaSharp.SKRect? ComputeMaskBoundsFromElement(OpenXmlElement chartElement, int pixelWidth, int pixelHeight)
+    {
+        var relId = GetChartRelationshipId(chartElement);
+        if (string.IsNullOrEmpty(relId)) return null;
+        var part = _document.MainDocumentPart?.GetPartById(relId) as ChartPart;
+        if (part == null) return null;
+        var data = ExtractChartData(part.ChartSpace);
+        return ComputeMaskBounds(data, pixelWidth, pixelHeight);
+    }
+
     public ChartRenderer(WordprocessingDocument document, ConvertOptions options)
     {
         _document = document;

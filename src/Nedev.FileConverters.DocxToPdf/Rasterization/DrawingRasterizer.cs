@@ -315,9 +315,20 @@ public sealed class DrawingRasterizer
     /// </summary>
     private SkiaSharp.SKRect? ComputeMaskFromChart(OpenXmlElement chartElement, int pixelWidth, int pixelHeight)
     {
-        // basic heuristic: inset 10% on each side to ignore axes margins
-        float insetX = pixelWidth * 0.1f;
-        float insetY = pixelHeight * 0.1f;
+            // attempt smarter mask using chart data
+            var renderer = new ChartRenderer(_document, _options);
+            var mask = renderer.ComputeMaskBoundsFromElement(chartElement, pixelWidth, pixelHeight);
+            if (mask.HasValue)
+            {
+                // ensure mask fits inside overall area
+                var m = mask.Value;
+                m.Left = Math.Max(0, m.Left);
+                m.Bottom = Math.Max(0, m.Bottom);
+                m.Right = Math.Min(pixelWidth, m.Right);
+                m.Top = Math.Min(pixelHeight, m.Top);
+                return m;
+            }
+            // fallback as before
         return new SkiaSharp.SKRect(insetX, insetY, pixelWidth - insetX, pixelHeight - insetY);
     }
 

@@ -458,6 +458,17 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
             // clear cache and ensure count resets
             ColumnText.ClearMaskCache();
             Assert.Equal(0, ColumnText.MaskCacheCount);
+            // simulate adding many entries via helper to trigger eviction
+            var addMethod = typeof(ColumnText).GetMethod("AddMaskToCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (addMethod != null)
+            {
+                for (int i = 0; i < 600; i++)
+                {
+                    var bmp = new SkiaSharp.SKBitmap(1,1);
+                    addMethod.Invoke(null, new object[] { "k"+i, bmp });
+                }
+                Assert.True(ColumnText.MaskCacheCount <= 500);
+            }
         }
 
         [Fact]

@@ -125,5 +125,24 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.NotNull(renderer);
             }
         }
+
+        [Fact]
+        public void ChartRenderer_ComputeMaskBounds_UsesSeriesRange()
+        {
+            var renderer = new ChartRenderer(null!, new ConvertOptions());
+            var data = new ChartData
+            {
+                ChartType = ChartType.Line
+            };
+            var series = new ChartSeries();
+            series.Values.AddRange(new[] { 10.0, 20.0, 30.0 });
+            data.Series.Add(series);
+
+            var mask = renderer.ComputeMaskBounds(data, 100, 100);
+            Assert.NotNull(mask);
+            var rect = mask.Value;
+            Assert.True(rect.Height < 90); // should be smaller than pure 10% inset (90)
+            Assert.True(rect.Width <= 90);
+        }
     }
 }
