@@ -291,8 +291,12 @@ public class ImageConverter
         }
         else if (_drawingRasterizer.CanRasterize(anchor))
         {
+            // TODO: some anchors (textboxes/SmartArt) contain text that could be
+            // converted into actual Paragraph/Chunk elements instead of rasterized
+            // images. Doing so would preserve text clarity and allow wrapping
+            // around individual words. For now we rasterize everything.
             var (pxW, pxH) = EstimatePixelSize(extent, pageWidth);
-            var png = _drawingRasterizer.RasterizeToPng(anchor, pxW, pxH);
+            var (png, mask) = _drawingRasterizer.RasterizeToPng(anchor, pxW, pxH);
             if (png != null)
             {
                 try
@@ -303,6 +307,11 @@ public class ImageConverter
                         var widthPt = StyleHelper.EmuToPoints(extent.Cx?.Value ?? 0);
                         var heightPt = StyleHelper.EmuToPoints(extent.Cy?.Value ?? 0);
                         if (widthPt > 0 && heightPt > 0) image.ScaleAbsolute(widthPt, heightPt);
+                        if (mask.HasValue)
+                        {
+                            // store precomputed mask bounds on the image object
+                            image.MaskBounds = mask.Value;
+                        }
                     }
                 }
                 catch { }

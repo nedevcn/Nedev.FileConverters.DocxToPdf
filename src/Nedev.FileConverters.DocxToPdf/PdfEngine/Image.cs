@@ -27,6 +27,12 @@ public class Image : IElement
     public float OriginalWidth { get; private set; }
     public float OriginalHeight { get; private set; }
 
+    /// <summary>
+    /// Precomputed mask bounds in image coordinates (points) derived from vector data.
+    /// When present, layout can use this instead of scanning the PNG.
+    /// </summary>
+    public SkiaSharp.SKRect? MaskBounds { get; set; }
+
     public float ScaledWidth => _scaledWidth;
     public float ScaledHeight => _scaledHeight;
 

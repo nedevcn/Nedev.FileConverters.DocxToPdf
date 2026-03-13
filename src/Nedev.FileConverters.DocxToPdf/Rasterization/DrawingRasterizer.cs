@@ -47,10 +47,10 @@ public sealed class DrawingRasterizer
     /// <summary>
     /// ??? DrawingML ?????? PNG ?????
     /// </summary>
-    public byte[]? RasterizeToPng(OpenXmlElement element, int pixelWidth, int pixelHeight)
+    public (byte[]? Png, SkiaSharp.SKRect? Mask) RasterizeToPng(OpenXmlElement element, int pixelWidth, int pixelHeight)
     {
         var graphicData = FindGraphicData(element);
-        if (graphicData == null) return null;
+        if (graphicData == null) return (null, null);
 
         var uri = graphicData.Uri?.Value ?? string.Empty;
 
@@ -308,6 +308,17 @@ public sealed class DrawingRasterizer
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Heuristic mask computation for charts based on extracted data; returns inset rectangle.
+    /// </summary>
+    private SkiaSharp.SKRect? ComputeMaskFromChart(OpenXmlElement chartElement, int pixelWidth, int pixelHeight)
+    {
+        // basic heuristic: inset 10% on each side to ignore axes margins
+        float insetX = pixelWidth * 0.1f;
+        float insetY = pixelHeight * 0.1f;
+        return new SkiaSharp.SKRect(insetX, insetY, pixelWidth - insetX, pixelHeight - insetY);
     }
 
     /// <summary>

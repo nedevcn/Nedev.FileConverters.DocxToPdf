@@ -44,12 +44,16 @@ public class ChartRenderer
             if (chartData == null || chartData.Series.Count == 0)
                 return RenderPlaceholder("Chart", "No data", pixelWidth, pixelHeight);
 
-            // 创建画布
-            var info = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+            // create higher‑resolution canvas for smoother output (2× scaling)
+            const float renderScale = 2f;
+            var realWidth = (int)(pixelWidth * renderScale);
+            var realHeight = (int)(pixelHeight * renderScale);
+            var info = new SKImageInfo(realWidth, realHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
             using var surface = SKSurface.Create(info);
             if (surface == null) return null;
 
             var canvas = surface.Canvas;
+            canvas.Scale(renderScale, renderScale);
             canvas.Clear(SKColors.White);
 
             // 根据图表类型渲染

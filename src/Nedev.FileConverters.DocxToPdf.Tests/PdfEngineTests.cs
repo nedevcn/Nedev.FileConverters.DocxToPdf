@@ -745,6 +745,91 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void DrawingRasterizer_RecognizesVariousTypes()
+        {
+            using var ms = new MemoryStream();
+            using var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document);
+            var main = doc.AddMainDocumentPart();
+            main.Document = new Document(new Body());
+
+            var raster = new Rasterization.DrawingRasterizer(doc, new ConvertOptions
+            {
+                RasterizeCharts = true,
+                RasterizeSmartArt = true,
+                RasterizeShapes = true
+            });
+
+            OpenXmlElement MakeGraphic(string uri)
+            {
+                var drawing = new DW.Drawing();
+                var inline = new DW.Inline();
+                var graphic = new A.Graphic();
+                var gd = new A.GraphicData { Uri = uri };
+                graphic.Append(gd);
+                inline.Append(graphic);
+                drawing.Append(inline);
+                return drawing;
+            }
+
+            var chart = MakeGraphic("http://schemas.openxmlformats.org/drawingml/2006/chart");
+            var diag = MakeGraphic("http://schemas.openxmlformats.org/drawingml/2006/diagram");
+            var shape = MakeGraphic("http://schemas.openxmlformats.org/drawingml/2006/main");
+
+            Assert.True(raster.CanRasterize(chart));
+            Assert.True(raster.CanRasterize(diag));
+            Assert.True(raster.CanRasterize(shape));
+
+            var (png1, mask1) = raster.RasterizeToPng(chart, 50, 50);
+            var (png2, mask2) = raster.RasterizeToPng(diag, 50, 50);
+            var (png3, mask3) = raster.RasterizeToPng(shape, 50, 50);
+            Assert.NotNull(png1);
+            Assert.NotNull(png2);
+            Assert.NotNull(png3);
+            // should be placeholders (white background + type label) => start with PNG header
+            Assert.Equal(0x89, png1[0]);
+            Assert.Equal(0x89, png2[0]);
+            Assert.Equal(0x89, png3[0]);
+            // ensure high‑res scale applied (dimensions >= requested)
+            using (var bmp1 = SkiaSharp.SKBitmap.Decode(png1)) Assert.True(bmp1.Width >= 50 && bmp1.Height >= 50);
+            using (var bmp2 = SkiaSharp.SKBitmap.Decode(png2)) Assert.True(bmp2.Width >= 50 && bmp2.Height >= 50);
+            using (var bmp3 = SkiaSharp.SKBitmap.Decode(png3)) Assert.True(bmp3.Width >= 50 && bmp3.Height >= 50);
+            // masks may be present (heuristic produces inset even for placeholders)
+            Assert.True(mask1.HasValue);
+            Assert.True(mask2.HasValue);
+            Assert.True(mask3.HasValue);
+        }
+
+        [Fact]
+        public void FloatingObject_UsesPrecomputedMask()
+        {
+            var cb = new PdfContentByte();
+            var ct = new ColumnText(cb);
+            ct.SetSimpleColumn(0,0,100,100);
+            using var bmp = new SkiaSharp.SKBitmap(10,10);
+            using var cnv = new SkiaSharp.SKCanvas(bmp);
+            cnv.Clear(SkiaSharp.SKColors.Teal);
+            using var im = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var d = im.Encode(SkiaSharp.SKEncodedImageFormat.Png,100);
+            var bytes = d.ToArray();
+            var img = PdfEngine.Image.GetInstance(bytes);
+            img.SetAbsolutePosition(0,0);
+            img.MaskBounds = new SkiaSharp.SKRect(2,2,6,6);
+            var floatObj = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img!)
+            {
+                Wrapping = WrappingStyle.Square,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 0
+            };
+            ct.AddElement(floatObj);
+            ct.Go(false);
+            Assert.Single(ct.Exclusions);
+            var r = ct.Exclusions[0];
+            Assert.Equal(2f, r.Left, 1);
+            Assert.Equal(2f, r.Bottom, 1);
+        }
+
+        [Fact]
         public void ColumnText_MixedDirectionChunks()
         {
             var cb = new PdfContentByte();

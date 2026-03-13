@@ -1137,42 +1137,71 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
             float rotHeight = height;
             float leftBB = left;
             float bottomBB = bottom;
-            try
+
+            if (img.MaskBounds.HasValue)
             {
-                var png = img.GetPngData();
-                using var ms2 = new MemoryStream(png);
-                using var codec2 = SkiaSharp.SKCodec.Create(ms2);
-                if (codec2 != null)
+                // MaskBounds given in image coordinates; translate to document coordinates
+                var mb = img.MaskBounds.Value;
+                leftBB = left + mb.Left;
+                bottomBB = bottom + mb.Bottom;
+                rotWidth = mb.Width;
+                rotHeight = mb.Height;
+            }
+            else
+            {
+                try
                 {
-                    using var bmpMask = SkiaSharp.SKBitmap.Decode(codec2);
-                    if (bmpMask != null)
+                    var png = img.GetPngData();
+                    using var ms2 = new MemoryStream(png);
+                    using var codec2 = SkiaSharp.SKCodec.Create(ms2);
+                    if (codec2 != null)
                     {
-                        SkiaSharp.SKBitmap mask = bmpMask;
-                        if (angle != 0)
-                            mask = RotateBitmap(bmpMask, angle);
-                        float scaleX = width / mask.Width;
-                        float scaleY = height / mask.Height;
-                        int minpx = mask.Width, maxpx = -1, minpy = mask.Height, maxpy = -1;
-                        for (int py = 0; py < mask.Height; py++)
+                        using var bmpMask = SkiaSharp.SKBitmap.Decode(codec2);
+                        if (bmpMask != null)
                         {
-                            for (int px = 0; px < mask.Width; px++)
+                            SkiaSharp.SKBitmap mask = bmpMask;
+                            if (angle != 0)
+                                mask = RotateBitmap(bmpMask, angle);
+                            float scaleX = width / mask.Width;
+                            float scaleY = height / mask.Height;
+                            int minpx = mask.Width, maxpx = -1, minpy = mask.Height, maxpy = -1;
+                            for (int py = 0; py < mask.Height; py++)
                             {
-                                if (mask.GetPixel(px, py).Alpha > 10)
+                                for (int px = 0; px < mask.Width; px++)
                                 {
-                                    minpx = Math.Min(minpx, px);
-                                    maxpx = Math.Max(maxpx, px);
-                                    minpy = Math.Min(minpy, py);
-                                    maxpy = Math.Max(maxpy, py);
+                                    if (mask.GetPixel(px, py).Alpha > 10)
+                                    {
+                                        minpx = Math.Min(minpx, px);
+                                        maxpx = Math.Max(maxpx, px);
+                                        minpy = Math.Min(minpy, py);
+                                        maxpy = Math.Max(maxpy, py);
+                                    }
                                 }
                             }
+                            if (maxpx >= 0)
+                            {
+                                rotWidth = (maxpx - minpx + 1) * scaleX;
+                                rotHeight = (maxpy - minpy + 1) * scaleY;
+                                leftBB = left + minpx * scaleX;
+                                bottomBB = bottom + (mask.Height - maxpy - 1) * scaleY;
+                            }
                         }
-                        if (maxpx >= 0)
-                        {
-                            rotWidth = (maxpx - minpx + 1) * scaleX;
-                            rotHeight = (maxpy - minpy + 1) * scaleY;
-                            leftBB = left + minpx * scaleX;
-                            bottomBB = bottom + (mask.Height - maxpy - 1) * scaleY;
-                        }
+                    }
+                }
+                catch
+                {
+                    // ignore and fall back to geometric bbox calculation below
+                    if (angle != 0)
+                    {
+                        var rad = -angle * Math.PI / 180.0; // match PdfWriter rotation sign
+                        var cos = (float)Math.Cos(rad);
+                        var sin = (float)Math.Sin(rad);
+                        rotWidth = Math.Abs(width * cos) + Math.Abs(height * sin);
+                        rotHeight = Math.Abs(height * cos) + Math.Abs(width * sin);
+                        float cx = left + width / 2f;
+                        float cy = bottom + height / 2f;
+                        leftBB = cx - rotWidth / 2f;
+                        bottomBB = cy - rotHeight / 2f;
                     }
                 }
             }

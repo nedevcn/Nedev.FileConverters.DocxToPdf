@@ -40,12 +40,16 @@ public class SmartArtRenderer
             if (smartArtData == null || smartArtData.Nodes.Count == 0)
                 return RenderPlaceholder("SmartArt", "No data", pixelWidth, pixelHeight);
 
-            // 创建画布
-            var info = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+            // create high‑res canvas and scale drawing for better fidelity
+            const float renderScale = 2f;
+            var realW = (int)(pixelWidth * renderScale);
+            var realH = (int)(pixelHeight * renderScale);
+            var info = new SKImageInfo(realW, realH, SKColorType.Bgra8888, SKAlphaType.Premul);
             using var surface = SKSurface.Create(info);
             if (surface == null) return null;
 
             var canvas = surface.Canvas;
+            canvas.Scale(renderScale, renderScale);
             canvas.Clear(SKColors.White);
 
             // 根据布局类型渲染
