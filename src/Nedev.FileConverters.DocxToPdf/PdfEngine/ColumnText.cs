@@ -1128,8 +1128,66 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                     addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight);
                     break;
                 case WrappingStyle.TopAndBottom:
-                    addRect(leftBB, bottomBB + rotHeight / 2f, leftBB + rotWidth, bottomBB + rotHeight);
-                    addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight / 2f);
+                    // generate per-row exclusions split into two regions; keeps text out of object
+                    // while adapting to its shape rather than using crude halves.
+                    try
+                    {
+                        var png = img.GetPngData();
+                        using var msTb = new MemoryStream(png);
+                        using var codecTb = SkiaSharp.SKCodec.Create(msTb);
+                        if (codecTb != null)
+                        {
+                            using var bmpOrigTb = SkiaSharp.SKBitmap.Decode(codecTb);
+                            if (bmpOrigTb != null)
+                            {
+                                SKBitmap bmpTb;
+                                var cacheKeyTb = img.ImageData != null
+                                    ? $"{img.ImageData.Length}_{img.ScaledWidth}x{img.ScaledHeight}_{angle}_tb"
+                                    : $"{bmpOrigTb.Width}x{bmpOrigTb.Height}_{img.ScaledWidth}x{img.ScaledHeight}_{angle}_tb";
+                                if (!_maskCache.TryGetValue(cacheKeyTb, out bmpTb))
+                                {
+                                    bmpTb = bmpOrigTb;
+                                    if (angle != 0)
+                                    {
+                                        bmpTb = RotateBitmap(bmpOrigTb, angle);
+                                    }
+                                    _maskCache[cacheKeyTb] = bmpTb;
+                                }
+                                float scaleXb = rotWidth / bmpTb.Width;
+                                float scaleYb = rotHeight / bmpTb.Height;
+                                int mid = bmpTb.Height / 2;
+                                for (int py = 0; py < bmpTb.Height; py++)
+                                {
+                                    int minx = bmpTb.Width, maxx = -1;
+                                    for (int px = 0; px < bmpTb.Width; px++)
+                                    {
+                                        var col = bmpTb.GetPixel(px, py);
+                                        if (col.Alpha > 10)
+                                        {
+                                            minx = Math.Min(minx, px);
+                                            maxx = Math.Max(maxx, px);
+                                        }
+                                    }
+                                    if (maxx >= 0)
+                                    {
+                                        float yTop = bottomBB + rotHeight - py * scaleYb;
+                                        float yBot = yTop - scaleYb;
+                                        float xL = leftBB + minx * scaleXb;
+                                        float xR = leftBB + (maxx + 1) * scaleXb;
+                                        addRect(xL, yBot, xR, yTop);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // fallback to simple halves
+                        addRect(leftBB, bottomBB + rotHeight / 2f, leftBB + rotWidth, bottomBB + rotHeight);
+                        addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight / 2f);
+                        break;
+                    }
                     break;
                 case WrappingStyle.Tight:
                 case WrappingStyle.Through:
