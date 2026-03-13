@@ -150,14 +150,33 @@ public class DrawingMLConverter
                 // underline/strike
                 if (runPr?.Underline != null && runPr.Underline.Val != DocumentFormat.OpenXml.Drawing.TextUnderlineValues.None)
                 {
-                    // simple default thickness/position
                     chunk.SetUnderline(0.1f, -1f);
                 }
                 if (runPr?.Strike != null)
                 {
-                    // strikethrough is just font style in iText
                     chunk.Font.Style |= iTextFont.STRIKETHRU;
                 }
+
+                // small caps: render uppercase while shrinking size
+                if (runPr?.SmallCaps != null)
+                {
+                    chunk.Content = chunk.Content.ToUpperInvariant();
+                    chunk.Font.Size *= 0.8f;
+                }
+
+                // color gradient: choose first stop if gradient fill present
+                if (runPr?.GradientFill != null)
+                {
+                    var stop = runPr.GradientFill.Descendants<DocumentFormat.OpenXml.Drawing.GradientStop>().FirstOrDefault();
+                    var clr = stop?.Descendants<DocumentFormat.OpenXml.Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                    if (!string.IsNullOrEmpty(clr))
+                    {
+                        try { chunk.Font.Color = new BaseColor(int.Parse(clr, System.Globalization.NumberStyles.HexNumber)); } catch { }
+                    }
+                }
+
+                // TODO: character spacing (kerning/tracking) could be applied here when
+                // DrawingML defines it; would require a new property on Chunk or Font.
 
                 pdfPara.Add(chunk);
     }

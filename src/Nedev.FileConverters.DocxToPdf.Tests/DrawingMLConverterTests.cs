@@ -274,6 +274,68 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
                 Assert.Contains("SimSun", pdfText, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("Italic", pdfText, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("underline", pdfText, StringComparison.OrdinalIgnoreCase);
+
+                // ensure text operators exist (a lightweight check)
+                Assert.Matches(@"\d+\s+Tf", pdfText);
+                Assert.Matches(@"TJ|Tj", pdfText);
+            }
+        }
+
+        [Fact]
+        public void ConvertDrawing_GradientAndSmallCaps_AreRespected()
+        {
+            using var ms = new MemoryStream();
+            using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body());
+
+                var drawing = new DocumentFormat.OpenXml.Wordprocessing.Drawing();
+                var inline = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline();
+                var extent = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = 914400, Cy = 228600 };
+                inline.Append(extent);
+                var graphic = new DocumentFormat.OpenXml.Drawing.Graphic();
+                var graphicData = new DocumentFormat.OpenXml.Drawing.GraphicData { Uri = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" };
+                var shape = new DocumentFormat.OpenXml.Drawing.Shape();
+                var txBody = new DocumentFormat.OpenXml.Drawing.TextBody();
+                txBody.Append(new DocumentFormat.OpenXml.Drawing.BodyProperties());
+
+                var para = new DocumentFormat.OpenXml.Drawing.Paragraph();
+                var run = new DocumentFormat.OpenXml.Drawing.Run();
+                var runPr = new DocumentFormat.OpenXml.Drawing.RunProperties();
+                // gradient fill with two stops
+                var grad = new DocumentFormat.OpenXml.Drawing.GradientFill();
+                grad.Append(new DocumentFormat.OpenXml.Drawing.GradientStop(
+                    new DocumentFormat.OpenXml.Drawing.RgbColorModelHex { Val = "FF0000" }
+                ));
+                grad.Append(new DocumentFormat.OpenXml.Drawing.GradientStop(
+                    new DocumentFormat.OpenXml.Drawing.RgbColorModelHex { Val = "0000FF" }
+                ));
+                runPr.Append(grad);
+                runPr.SmallCaps = new DocumentFormat.OpenXml.Drawing.SmallCaps();
+                run.Append(runPr);
+                run.Append(new DocumentFormat.OpenXml.Drawing.Text("smallcaps"));
+                para.Append(run);
+                txBody.Append(para);
+                shape.Append(txBody);
+                graphicData.Append(shape);
+                graphic.Append(graphicData);
+                inline.Append(graphic);
+                drawing.Append(inline);
+
+                main.Document.Save();
+
+                var options = new ConvertOptions();
+                var fontHelper = new FontHelper(options);
+                var converter = new DrawingMLConverter(doc, fontHelper);
+                var result = converter.ConvertDrawing(drawing, 500f);
+
+                var pdfPara = (iTextParagraph)result;
+                var chunk = pdfPara.Chunks[0];
+                Assert.Equal("SMALLCAPS", chunk.Content);
+                // size should be reduced
+                Assert.True(chunk.Font.Size < options.DefaultFontSize);
+                Assert.Equal(new BaseColor(0xFF,0x00,0x00), chunk.Font.Color);
             }
         }
     }
