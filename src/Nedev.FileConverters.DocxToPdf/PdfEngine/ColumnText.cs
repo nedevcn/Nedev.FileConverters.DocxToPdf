@@ -7,6 +7,14 @@ namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 /// </summary>
 public class ColumnText
 {
+    // cache for decoded (and rotated) bitmaps used when calculating tight/through masks
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SkiaSharp.SKBitmap> _maskCache =
+        new(System.StringComparer.Ordinal);
+
+    /// <summary>
+    /// Number of entries in the image mask cache. Visible for unit tests.
+    /// </summary>
+    internal static int MaskCacheCount => _maskCache.Count;
     private readonly PdfContentByte _canvas;
     private readonly List<IElement> _elements = [];
 
@@ -1127,11 +1135,20 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                             using var bmpOrig = SkiaSharp.SKBitmap.Decode(codec);
                             if (bmpOrig != null)
                             {
-                                SKBitmap bmp = bmpOrig;
-                                if (angle != 0)
+                                SKBitmap bmp;
+                                // if angle==0 we can cache original, otherwise rotated version
+                                var cacheKey = img.ImageData != null
+                                    ? $"{img.ImageData.Length}_{angle}"
+                                    : $"{bmpOrig.Width}x{bmpOrig.Height}_{angle}";
+                                if (!_maskCache.TryGetValue(cacheKey, out bmp))
                                 {
-                                    // rotate bitmap so mask matches rendered orientation
-                                    bmp = RotateBitmap(bmpOrig, angle);
+                                    bmp = bmpOrig;
+                                    if (angle != 0)
+                                    {
+                                        // rotate bitmap so mask matches rendered orientation
+                                        bmp = RotateBitmap(bmpOrig, angle);
+                                    }
+                                    _maskCache[cacheKey] = bmp;
                                 }
                                 float scaleX = rotWidth / bmp.Width;
                                 float scaleY = rotHeight / bmp.Height;

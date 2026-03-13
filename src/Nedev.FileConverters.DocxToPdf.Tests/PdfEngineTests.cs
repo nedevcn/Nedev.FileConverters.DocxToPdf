@@ -405,6 +405,51 @@ namespace Nedev.FileConverters.DocxToPdf.Tests
         }
 
         [Fact]
+        public void FloatingObject_MaskBitmapIsCached()
+        {
+            // clear any existing cache
+            typeof(ColumnText).GetProperty("MaskCacheCount", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)?.GetValue(null); // just to ensure property exists
+            // create two column texts with identical image and rotation
+            using var bmp = new SkiaSharp.SKBitmap(5,5);
+            using var cnv = new SkiaSharp.SKCanvas(bmp);
+            cnv.Clear(SkiaSharp.SKColors.Purple);
+            using var im = SkiaSharp.SKImage.FromBitmap(bmp);
+            using var d = im.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            var bytes = d.ToArray();
+            var img = PdfEngine.Image.GetInstance(bytes);
+            img.RotationAngle = 30;
+            img.SetAbsolutePosition(0, 0);
+
+            var obj1 = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img!)
+            {
+                Wrapping = WrappingStyle.Tight,
+                PositionIsAbsolute = true,
+                Left = 0,
+                Top = 0
+            };
+            var obj2 = new global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject(img!)
+            {
+                Wrapping = WrappingStyle.Tight,
+                PositionIsAbsolute = true,
+                Left = 20,
+                Top = 20
+            };
+            var cb1 = new PdfContentByte();
+            var ct1 = new ColumnText(cb1);
+            ct1.SetSimpleColumn(0,0,100,100);
+            ct1.AddElement(obj1);
+            ct1.Go(false);
+            var cb2 = new PdfContentByte();
+            var ct2 = new ColumnText(cb2);
+            ct2.SetSimpleColumn(0,0,100,100);
+            ct2.AddElement(obj2);
+            ct2.Go(false);
+            // after two layouts the underlying cache should contain a single entry
+            int count = ColumnText.MaskCacheCount;
+            Assert.Equal(1, count);
+        }
+
+        [Fact]
         public void FloatingObject_TightWrapUsesShape()
         {
             var cb2 = new PdfContentByte();
