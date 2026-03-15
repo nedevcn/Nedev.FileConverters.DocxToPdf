@@ -1,7 +1,18 @@
+using Nedev.FileConverters.DocxToPdf.Models;
+
 namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 
 /// <summary>
-/// ??????
+/// 文本方向枚举
+/// </summary>
+public enum TextDirection
+{
+    Horizontal,
+    Vertical
+}
+
+/// <summary>
+/// 元素对齐常量
 /// </summary>
 public static class Element
 {
@@ -134,13 +145,13 @@ public class Chunk : IElement
 }
 
 /// <summary>
-/// ??(??Chunk???)
+/// 短语(包含Chunk的集合)
 /// </summary>
 public class Phrase : IElement
 {
     private readonly List<Chunk> _chunks = [];
 
-    public int Type => 1;
+    public virtual int Type => 1;
     public bool IsContent() => true;
     public bool IsNestable() => false;
 
@@ -214,7 +225,7 @@ public class Paragraph : Phrase
     private readonly List<IElement> _extraElements = [];
     public IEnumerable<IElement> ExtraElements => _extraElements;
 
-    public new int Type => 2;
+    public override int Type => 2;
 
     public Paragraph(string? text = null, Font? font = null) : base(text, font) { }
 

@@ -231,13 +231,7 @@ public class PdfReader : IDisposable
 }
 
 /// <summary>
-/// PDF???(???????)
-/// </summary>
-public class PdfStamper : IDisposable
-{
-
-/// <summary>
-/// PDF???(???????)
+/// PDF编辑工具（用于添加水印等）
 /// </summary>
 public class PdfStamper : IDisposable
 {
@@ -423,5 +417,4 @@ public class PdfStamper : IDisposable
     {
         Close();
     }
-}
 }

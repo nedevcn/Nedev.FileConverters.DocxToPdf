@@ -1,3 +1,6 @@
+using Nedev.FileConverters.DocxToPdf.Converters;
+using Nedev.FileConverters.DocxToPdf.Models;
+
 namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 
 /// <summary>

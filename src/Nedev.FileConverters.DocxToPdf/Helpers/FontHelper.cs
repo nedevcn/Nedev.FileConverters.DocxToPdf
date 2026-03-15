@@ -146,19 +146,31 @@ public class FontHelper
     /// <summary>
     /// ?? DOCX RunProperties ? ParagraphMarkRunProperties ?? iTextSharp Font
     /// </summary>
-    public iTextFont GetFont(RunProperties? runProperties, ParagraphMarkRunProperties? paraRunProps, float? defaultSize = null, bool boldOverride = false)
+    public iTextFont GetFont(RunProperties? runProperties, ParagraphMarkRunProperties? paraRunProps, float? defaultSize = null, bool boldOverride = false, string? preferredFontName = null)
     {
         var fontSize = defaultSize ?? _options.DefaultFontSize;
         var fontStyle = iTextFont.NORMAL;
         BaseColor? color = null;
         string? fontName = null;
 
-        var rFonts = runProperties?.GetFirstChild<RunFonts>() ?? paraRunProps?.GetFirstChild<RunFonts>();
-        fontName = rFonts?.Ascii?.Value ?? rFonts?.EastAsia?.Value ?? rFonts?.HighAnsi?.Value;
+        // 优先使用传入的首选字体名称（来自样式继承）
+        if (!string.IsNullOrWhiteSpace(preferredFontName))
+        {
+            fontName = preferredFontName;
+            if (_fontNameMap.TryGetValue(fontName, out var mappedName))
+                fontName = mappedName;
+        }
 
-        // ????
-        if (fontName != null && _fontNameMap.TryGetValue(fontName, out var englishName))
-            fontName = englishName;
+        // 如果没有首选字体，则从 Run 属性中获取
+        if (string.IsNullOrWhiteSpace(fontName))
+        {
+            var rFonts = runProperties?.GetFirstChild<RunFonts>() ?? paraRunProps?.GetFirstChild<RunFonts>();
+            fontName = rFonts?.Ascii?.Value ?? rFonts?.EastAsia?.Value ?? rFonts?.HighAnsi?.Value;
+
+            // ????
+            if (fontName != null && _fontNameMap.TryGetValue(fontName, out var englishName))
+                fontName = englishName;
+        }
 
         var sz = runProperties?.GetFirstChild<FontSize>() ?? paraRunProps?.GetFirstChild<FontSize>();
         if (sz?.Val?.Value is string sizeStr && float.TryParse(sizeStr, out var halfPt))

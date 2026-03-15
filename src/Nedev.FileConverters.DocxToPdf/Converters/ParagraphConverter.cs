@@ -30,6 +30,7 @@ public class ParagraphConverter
 
     private readonly FontHelper _fontHelper;
     private readonly Styles? _styles;
+    private readonly StyleInheritanceResolver _styleResolver;
     private readonly OpenXmlElement? _colorScheme;
     private readonly IReadOnlyDictionary<string, string>? _hyperlinkTargets;
     private readonly IReadOnlyDictionary<int, int>? _footnoteNumberById;
@@ -67,6 +68,7 @@ public class ParagraphConverter
     {
         _fontHelper = fontHelper;
         _styles = styles;
+        _styleResolver = new StyleInheritanceResolver(styles);
         _colorScheme = colorScheme;
         _hyperlinkTargets = hyperlinkTargets;
         _footnoteNumberById = footnoteNumberById;
@@ -177,20 +179,25 @@ public class ParagraphConverter
         var paraProps = docxParagraph.ParagraphProperties;
         var styleId = paraProps?.ParagraphStyleId?.Val?.Value;
 
-        // 对齐方式
-        JustificationValues? justification = paraProps?.Justification?.Val?.Value ?? GetStyleJustification(styleId);
+        // 使用新的样式继承解析器获取完整样式
+        var resolvedStyle = _styleResolver.ResolveStyle(styleId);
+        var effectiveStyle = _styleResolver.MergeWithDirectProperties(resolvedStyle, paraProps);
+
+        // 对齐方式 - 优先使用直接属性，否则使用继承样式
+        JustificationValues? justification = paraProps?.Justification?.Val?.Value ?? effectiveStyle.Justification;
         if (justification != null)
         {
             pdfParagraph.Alignment = StyleHelper.ToiTextAlignment(justification);
         }
 
-        // 判断是否为标题
-        var isHeading = StyleHelper.IsHeadingStyle(styleId);
-        float? headingSize = isHeading ? StyleHelper.GetHeadingFontSize(styleId) : null;
-        int? headingLevel = isHeading ? GetHeadingLevel(styleId) : null;
+        // 判断是否为标题 - 使用解析后的样式
+        var isHeading = effectiveStyle.IsHeading();
+        var headingLevel = effectiveStyle.GetHeadingLevel();
+        float? headingSize = headingLevel.HasValue ? StyleHelper.GetHeadingFontSize($"Heading{headingLevel.Value}") : null;
 
-        var effectiveSpacing = paraProps?.SpacingBetweenLines ?? GetStyleSpacing(styleId);
-        var effectiveIndentation = paraProps?.Indentation ?? GetStyleIndentation(styleId);
+        // 使用解析后的间距和缩进
+        var effectiveSpacing = paraProps?.SpacingBetweenLines ?? effectiveStyle.Spacing;
+        var effectiveIndentation = paraProps?.Indentation ?? effectiveStyle.Indentation;
 
         // 从段落的第一个 Run 获取实际字号
         float actualFontSize = 12f;
@@ -198,7 +205,8 @@ public class ParagraphConverter
         var runProps = firstRun?.RunProperties;
         var paraRunProps = paraProps?.GetFirstChild<ParagraphMarkRunProperties>();
         
-        var styleFontSizeStr = GetStyleFontSize(styleId);
+        // 优先使用解析后的样式字体大小
+        var styleFontSizeStr = effectiveStyle.FontSize;
         var fontSizeStr = runProps?.FontSize?.Val?.Value
                           ?? paraRunProps?.GetFirstChild<FontSize>()?.Val?.Value
                           ?? styleFontSizeStr;
@@ -212,9 +220,14 @@ public class ParagraphConverter
             actualFontSize = headingSize.Value;
         }
 
+        // 使用解析后的字体信息
+        var preferredFontName = effectiveStyle.GetPreferredFontName();
+        var isBold = effectiveStyle.Bold ?? false;
+        var isItalic = effectiveStyle.Italic ?? false;
+
         var sampleFont = isHeading
             ? _fontHelper.GetFont(headingSize ?? 16f, iTextFont.BOLD)
-            : _fontHelper.GetFont(runProps, paraRunProps, actualFontSize, forceBold);
+            : _fontHelper.GetFont(runProps, paraRunProps, actualFontSize, forceBold || isBold, preferredFontName);
 
         var baseLineHeight = GetBaseLineHeight(sampleFont, actualFontSize);
         
@@ -224,8 +237,8 @@ public class ParagraphConverter
         // 段落缩进
         SetParagraphIndentation(pdfParagraph, effectiveIndentation);
 
-        // 段落控制：KeepWithNext、KeepLinesTogether
-        ApplyParagraphKeepOptions(pdfParagraph, paraProps, styleId);
+        // 段落控制：KeepWithNext、KeepLinesTogether - 使用解析后的样式
+        ApplyParagraphKeepOptions(pdfParagraph, paraProps, effectiveStyle);
 
         // 当正在处理由字段（SimpleField 或复杂字段）产生的超链接时，临时保存 URL，
         // 以便 AppendInline 在生成 Chunk 时添加 anchor 属性。
@@ -903,11 +916,15 @@ public class ParagraphConverter
         return sz?.Val?.Value;
     }
 
-    private void ApplyParagraphKeepOptions(iTextParagraph pdfParagraph, ParagraphProperties? paraProps, string? styleId)
+    private void ApplyParagraphKeepOptions(iTextParagraph pdfParagraph, ParagraphProperties? paraProps, ResolvedStyle effectiveStyle)
     {
         // KeepLinesTogether: 段落内容保持在一起不拆分
-        var keepLines = paraProps?.KeepLines ?? GetStyleKeepLines(styleId);
+        var keepLines = paraProps?.KeepLines;
         if (keepLines != null && (keepLines.Val == null || keepLines.Val.Value))
+        {
+            pdfParagraph.KeepTogether = true;
+        }
+        else if (keepLines == null && effectiveStyle.KeepLines)
         {
             pdfParagraph.KeepTogether = true;
         }
@@ -917,9 +934,11 @@ public class ParagraphConverter
         // 实际应用需要在文档级别处理，将连续的 KeepWithNext 段落组合
     }
 
-    private KeepLines? GetStyleKeepLines(string? styleId)
+    private void ApplyParagraphKeepOptions(iTextParagraph pdfParagraph, ParagraphProperties? paraProps, string? styleId)
     {
-        return GetFromStyleChain(styleId, s => s.StyleParagraphProperties?.GetFirstChild<KeepLines>());
+        // 保留旧方法以兼容现有代码
+        var resolvedStyle = _styleResolver.ResolveStyle(styleId);
+        ApplyParagraphKeepOptions(pdfParagraph, paraProps, resolvedStyle);
     }
 
     private static int? GetHeadingLevel(string? styleId)

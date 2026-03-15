@@ -1,4 +1,4 @@
-﻿using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Nedev.FileConverters.DocxToPdf.Helpers;
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
@@ -9,7 +9,7 @@ using WParagraph = DocumentFormat.OpenXml.Wordprocessing.Paragraph;
 namespace Nedev.FileConverters.DocxToPdf.Converters;
 
 /// <summary>
-/// DOCX ??? PDF ??
+/// DOCX 表格转 PDF 表格
 /// </summary>
 public class TableConverter
 {
@@ -19,6 +19,7 @@ public class TableConverter
     private readonly ListConverter? _listConverter;
     private readonly Numbering? _numbering;
     private readonly Styles? _styles;
+    private readonly StyleInheritanceResolver _styleResolver;
     private readonly OpenXmlElement? _colorScheme;
 
     public TableConverter(
@@ -36,6 +37,7 @@ public class TableConverter
         _listConverter = listConverter;
         _numbering = numbering;
         _styles = styles;
+        _styleResolver = new StyleInheritanceResolver(styles);
         _colorScheme = colorScheme;
     }
 
