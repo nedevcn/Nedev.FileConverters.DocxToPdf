@@ -269,6 +269,9 @@ public class PdfStamper : IDisposable
 
     public void Close()
     {
+        // Local helper to write bytes to the output stream
+        void WriteBytes(byte[] bytes) => _outputStream.Write(bytes, 0, bytes.Length);
+
         // write the entire original PDF bytes
         var originalBytes = _reader.GetRawBytes();
         _outputStream.Write(originalBytes, 0, originalBytes.Length);

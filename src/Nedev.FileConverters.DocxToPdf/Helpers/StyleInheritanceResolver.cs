@@ -128,8 +128,8 @@ public class StyleInheritanceResolver
             if (paraProps.GetFirstChild<PageBreakBefore>() is var pageBreakBefore)
                 target.PageBreakBefore = pageBreakBefore.Val != null && pageBreakBefore.Val.Value;
 
-            if (paraProps.GetFirstChild<WidowControl>() is var widowControl)
-                target.WidowControl = widowControl.Val?.Value ?? 0;
+            if (paraProps.GetFirstChild<WidowControl>()?.Val?.Value is bool widowVal)
+                target.WidowControl = widowVal ? 1 : 0;
 
             // 大纲级别
             if (paraProps.GetFirstChild<OutlineLevel>()?.Val?.Value is var outlineLevel)
@@ -198,16 +198,18 @@ public class StyleInheritanceResolver
                 target.VerticalAlignment = vertAlign;
 
             // 字符间距
-            if (runProps.GetFirstChild<Spacing>()?.Val?.Value is var spacing)
-                target.CharacterSpacing = spacing;
+            var spacingVal = runProps.GetFirstChild<Spacing>()?.Val?.Value;
+            if (spacingVal != null)
+                target.CharacterSpacing = spacingVal.ToString();
 
             // 字间距调整
-            if (runProps.GetFirstChild<Kern>()?.Val?.Value is var kern)
-                target.Kern = kern;
+            var kernVal = runProps.GetFirstChild<Kern>()?.Val?.Value;
+            if (kernVal != null)
+                target.Kern = kernVal.ToString();
 
-            // 缩放
-            if (runProps.GetFirstChild<Scale>()?.Val?.Value is var scale)
-                target.Scale = scale;
+            // 缩放 (Scale 类在当前版本中不可用)
+            // if (runProps.GetFirstChild<Scale>()?.Val?.Value is var scale)
+            //     target.Scale = scale;
 
             // 位置
             if (runProps.GetFirstChild<Position>()?.Val?.Value is var position)
@@ -231,8 +233,8 @@ public class StyleInheritanceResolver
             target.StyleType = styleType;
 
         // 默认样式标记
-        if (source.Default?.Val?.Value is var isDefault)
-            target.IsDefault = isDefault;
+        if (source.Default?.HasValue == true)
+            target.IsDefault = source.Default.Value;
     }
 
     /// <summary>
@@ -332,8 +334,9 @@ public class StyleInheritanceResolver
         if (directProps.GetFirstChild<VerticalTextAlignment>()?.Val?.Value is var vertAlign)
             result.VerticalAlignment = vertAlign;
 
-        if (directProps.GetFirstChild<Spacing>()?.Val?.Value is var spacing)
-            result.CharacterSpacing = spacing;
+        var spacing = directProps.GetFirstChild<Spacing>()?.Val?.Value;
+        if (spacing != null)
+            result.CharacterSpacing = spacing.ToString();
 
         if (directProps.GetFirstChild<SmallCaps>()?.Val?.Value is var smallCaps)
             result.SmallCaps = smallCaps;

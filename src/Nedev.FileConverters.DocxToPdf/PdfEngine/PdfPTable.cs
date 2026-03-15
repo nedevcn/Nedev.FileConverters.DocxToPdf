@@ -144,7 +144,7 @@ public class PdfPTable : IElement
     public object? TableEvent { get; set; }
     public const int LINECANVAS = 0;
 
-    public List<PdfPRow> RowsList { get; } = [];
+    public List<PdfPRow> RowsList { get; set; } = [];
     private readonly List<float> _widths = [];
 
     public PdfPTable(int numColumns)

@@ -62,7 +62,7 @@ public class DocxToPdfConverter : IFileConverter
     }
 
     private ColumnInfo _currentColumnInfo = new();
-    private Models.TextDirection _currentTextDirection = Models.TextDirection.Horizontal;
+    private PdfEngine.TextDirection _currentTextDirection = PdfEngine.TextDirection.Horizontal;
 
     private class ColumnInfo
     {
@@ -310,12 +310,12 @@ public class DocxToPdfConverter : IFileConverter
             }
 
             // attach page event now that renderer exists
-            var events = new List<PdfPageEventHelper>() { new HeaderFooterPageEvent(headerFooterRenderer, sectionTracker, _sectionSettingsMap) };
+            var pageEvents = new List<PdfPageEventHelper>() { new HeaderFooterPageEvent(headerFooterRenderer, sectionTracker, _sectionSettingsMap) };
             if (_options.Watermark != null && !string.IsNullOrEmpty(_options.Watermark.Text))
             {
-                events.Add(new WatermarkPageEvent(_options.Watermark));
+                pageEvents.Add(new WatermarkPageEvent(_options.Watermark));
             }
-            writer.PageEvent = new CombinedPageEvent(events.ToArray());
+            writer.PageEvent = new CombinedPageEvent(pageEvents.ToArray());
         }
         else
         {
@@ -333,7 +333,7 @@ public class DocxToPdfConverter : IFileConverter
         bool sectionBreakEncountered = false;
 
         // Deferred InFrontOfText images — drawn after ColumnText.Go() to ensure correct z-order
-        var pendingInFrontImages = new List<global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject>();
+        var pendingInFrontImages = new List<global::Nedev.FileConverters.DocxToPdf.PdfEngine.FloatingObject>();
 
         void FlushInFrontImages()
         {
@@ -361,7 +361,7 @@ public class DocxToPdfConverter : IFileConverter
             var colWidth = (availableWidth - (info.Count - 1) * info.Spacing) / info.Count;
             
             float llx;
-            if (_currentTextDirection == Models.TextDirection.Vertical)
+            if (_currentTextDirection == PdfEngine.TextDirection.Vertical)
             {
                 // 竖排：从右向左分栏
                 llx = pageSize.Width - mr - (currentColumn * (colWidth + info.Spacing)) - colWidth;
@@ -463,18 +463,18 @@ public class DocxToPdfConverter : IFileConverter
                 }
 
                 // 处理浮动对象
-                if (item is global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject floatObj)
+                if (item is global::Nedev.FileConverters.DocxToPdf.PdfEngine.FloatingObject floatObj)
                 {
-                    if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.BehindText)
+                    if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle.BehindText)
                     {
                         writer.DirectContentUnder.AddImage(floatObj.Image);
                     }
-                    else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.InFrontOfText)
+                    else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle.InFrontOfText)
                     {
                         // Defer drawing until after ColumnText.Go() to ensure images appear above text
                         pendingInFrontImages.Add(floatObj);
                     }
-                    else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.TopAndBottom)
+                    else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle.TopAndBottom)
                     {
                         // 上下型：
                         // 1. 结束当前行，换行
@@ -511,9 +511,9 @@ public class DocxToPdfConverter : IFileConverter
                         // 调整 YLine
                         ct.YLine = imgY - 5f;
                     }
-                    else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Square || 
-                             floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Tight || 
-                             floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Through)
+                    else if (floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle.Square || 
+                             floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle.Tight || 
+                             floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle.Through)
                     {
                         // 四周型/紧密型/穿越型：文字环绕图片 (真环绕)
                         var currentY = ct.YLine;
@@ -1673,11 +1673,11 @@ public class DocxToPdfConverter : IFileConverter
         var textDir = sectionProps.GetFirstChild<DocumentFormat.OpenXml.Wordprocessing.TextDirection>();
         if (textDir != null && textDir.Val?.Value == TextDirectionValues.TopToBottomRightToLeft)
         {
-            _currentTextDirection = Models.TextDirection.Vertical;
+            _currentTextDirection = PdfEngine.TextDirection.Vertical;
         }
         else
         {
-            _currentTextDirection = Models.TextDirection.Horizontal;
+            _currentTextDirection = PdfEngine.TextDirection.Horizontal;
         }
 
         // 多栏支持
@@ -1894,17 +1894,6 @@ public class DocxToPdfConverter : IFileConverter
                     break;
             }
         }
-    }
-}
-
-/// <summary>用于两遍转换时记录每页所属节</summary>
-internal class SectionTracker : PdfPageEventHelper
-{
-    public int CurrentSection { get; set; }
-    public readonly List<int> PageSections = new();
-    public override void OnStartPage(PdfWriter writer, iTextDocument document)
-    {
-        PageSections.Add(CurrentSection);
     }
 }
 

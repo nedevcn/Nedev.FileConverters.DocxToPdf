@@ -30,6 +30,16 @@ public class FloatingObject : IElement
     /// </summary>
     public float TextDistance { get; set; }
 
+    /// <summary>
+    /// 浮动对象宽度（来自 Image.ScaledWidth）
+    /// </summary>
+    public float Width => Image?.ScaledWidth ?? 0;
+
+    /// <summary>
+    /// 浮动对象高度（来自 Image.ScaledHeight）
+    /// </summary>
+    public float Height => Image?.ScaledHeight ?? 0;
+
     // IElement 实现
     public int Type => -100; // Custom type
     public bool IsContent() => true;

@@ -62,12 +62,12 @@ public sealed class DrawingRasterizer
             if (chartElement != null)
             {
                 var result = chartRenderer.RenderToPng(chartElement, pixelWidth, pixelHeight);
-                if (result != null) return result;
+                if (result != null) return (result, null);
             }
 
             // 如果渲染失败，回退到占位符
             var summary = ExtractChartSummary(graphicData);
-            return RasterizePlaceholder("Chart", summary, pixelWidth, pixelHeight);
+            return (RasterizePlaceholder("Chart", summary, pixelWidth, pixelHeight), null);
         }
         else if (uri.Contains("/diagram", StringComparison.OrdinalIgnoreCase))
         {
@@ -77,17 +77,17 @@ public sealed class DrawingRasterizer
             if (diagramElement != null)
             {
                 var result = smartArtRenderer.RenderToPng(diagramElement, pixelWidth, pixelHeight);
-                if (result != null) return result;
+                if (result != null) return (result, null);
             }
 
             // 如果渲染失败，回退到占位符
             var summary = ExtractDiagramSummary(graphicData);
-            return RasterizePlaceholder("SmartArt", summary, pixelWidth, pixelHeight);
+            return (RasterizePlaceholder("SmartArt", summary, pixelWidth, pixelHeight), null);
         }
         else
         {
             var summary = ExtractShapeSummary(graphicData);
-            return RasterizePlaceholder("Shape", summary, pixelWidth, pixelHeight);
+            return (RasterizePlaceholder("Shape", summary, pixelWidth, pixelHeight), null);
         }
     }
 
@@ -328,8 +328,10 @@ public sealed class DrawingRasterizer
                 m.Top = Math.Min(pixelHeight, m.Top);
                 return m;
             }
-            // fallback as before
-        return new SkiaSharp.SKRect(insetX, insetY, pixelWidth - insetX, pixelHeight - insetY);
+            // fallback as before - use default insets
+            float insetX = pixelWidth * 0.1f;
+            float insetY = pixelHeight * 0.1f;
+            return new SkiaSharp.SKRect(insetX, insetY, pixelWidth - insetX, pixelHeight - insetY);
     }
 
     /// <summary>

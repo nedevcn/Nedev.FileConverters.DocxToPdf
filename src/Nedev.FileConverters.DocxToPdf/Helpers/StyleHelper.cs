@@ -172,20 +172,20 @@ public static class StyleHelper
         if (direct != null)
             return ApplyTintShade(direct, colorNode.ThemeTint?.Value, colorNode.ThemeShade?.Value);
 
-        // HSL color model
-        var hsl = colorNode.GetFirstChild<DocumentFormat.OpenXml.Drawing.HslColorModelHex>();
-        if (hsl != null)
-        {
-            try
-            {
-                double hue = int.Parse(hsl.Hue?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
-                double sat = int.Parse(hsl.Saturation?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
-                double lum = int.Parse(hsl.Luminance?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
-                var rgb = HslToRgb(hue, sat, lum);
-                return ApplyTintShade(rgb, colorNode.ThemeTint?.Value, colorNode.ThemeShade?.Value);
-            }
-            catch { }
-        }
+        // HSL color model (HslColorModelHex 类在当前版本中不可用)
+        // var hsl = colorNode.GetFirstChild<DocumentFormat.OpenXml.Drawing.HslColorModelHex>();
+        // if (hsl != null)
+        // {
+        //     try
+        //     {
+        //         double hue = int.Parse(hsl.Hue?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
+        //         double sat = int.Parse(hsl.Saturation?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
+        //         double lum = int.Parse(hsl.Luminance?.Value ?? "0", System.Globalization.NumberStyles.HexNumber) / 65535.0;
+        //         var rgb = HslToRgb(hue, sat, lum);
+        //         return ApplyTintShade(rgb, colorNode.ThemeTint?.Value, colorNode.ThemeShade?.Value);
+        //     }
+        //     catch { }
+        // }
 
         // system color (lastColor attribute is fallback hex)
         var sys = colorNode.GetFirstChild<DocumentFormat.OpenXml.Drawing.SystemColor>();

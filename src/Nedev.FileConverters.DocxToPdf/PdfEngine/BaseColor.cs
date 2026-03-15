@@ -46,6 +46,17 @@ public class BaseColor
         A = (byte)Math.Clamp(Math.Round(a * 255), 0, 255);
     }
 
+    /// <summary>
+    /// 从 ARGB 整数创建颜色 (0xAARRGGBB 格式)
+    /// </summary>
+    public BaseColor(int argb)
+    {
+        A = (byte)((argb >> 24) & 0xFF);
+        R = (byte)((argb >> 16) & 0xFF);
+        G = (byte)((argb >> 8) & 0xFF);
+        B = (byte)(argb & 0xFF);
+    }
+
     public int ToArgb() => (A << 24) | (R << 16) | (G << 8) | B;
 
     public float[] ToRgbFloats() => [R / 255f, G / 255f, B / 255f];

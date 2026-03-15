@@ -271,13 +271,13 @@ public class FontHelper
 
         if (runPr != null)
         {
-            if (runPr.FontSize != null && runPr.FontSize.Val.HasValue)
-                fontSize = runPr.FontSize.Val.Value / 100f;
+            if (runPr.FontSize?.HasValue == true)
+                fontSize = runPr.FontSize.Value / 100f;
 
-            if (runPr.Bold != null && (runPr.Bold.Val == null || runPr.Bold.Val.Value))
+            if (runPr.Bold?.HasValue == true && runPr.Bold.Value)
                 fontStyle |= iTextFont.BOLD;
 
-            if (runPr.Italic != null && (runPr.Italic.Val == null || runPr.Italic.Val.Value))
+            if (runPr.Italic?.HasValue == true && runPr.Italic.Value)
                 fontStyle |= iTextFont.ITALIC;
 
             // color may be specified as rgb

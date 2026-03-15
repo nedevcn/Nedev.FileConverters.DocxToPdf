@@ -1,5 +1,8 @@
 using Nedev.FileConverters.DocxToPdf.PdfEngine;
 
+// 使用 PdfEngine 命名空间中的 TextDirection
+using TextDirection = Nedev.FileConverters.DocxToPdf.PdfEngine.TextDirection;
+
 namespace Nedev.FileConverters.DocxToPdf.Models;
 
 /// <summary>
@@ -213,15 +216,6 @@ public class LineNumberSettings
     public float Distance { get; set; } = 0; // twips / 20 -> pt
     /// <summary>重置模式：continuous, newPage, newSection</summary>
     public LineNumberRestartMode RestartMode { get; set; } = LineNumberRestartMode.Continuous;
-}
-
-/// <summary>
-/// 文本流向
-/// </summary>
-public enum TextDirection
-{
-    Horizontal, // lrTb
-    Vertical    // tbRl
 }
 
 public enum LineNumberRestartMode

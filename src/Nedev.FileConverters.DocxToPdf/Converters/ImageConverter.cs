@@ -14,41 +14,51 @@ using Nedev.FileConverters.DocxToPdf.Rasterization;
 namespace Nedev.FileConverters.DocxToPdf.Converters;
 
 /// <summary>
-/// ????????
+/// 使用 PdfEngine 命名空间中的 WrappingStyle
 /// </summary>
-public enum WrappingStyle
-{
-    Inline,         // ????
-    InFrontOfText,  // ??????
-    BehindText,     // ??????
-    TopAndBottom,   // ???
-    Square,         // ???
-    Tight,          // ???(?? Square ??)
-    Through         // ???(?? Square ??)
-}
+using WrappingStyle = Nedev.FileConverters.DocxToPdf.PdfEngine.WrappingStyle;
 
 /// <summary>
-/// ??????
+/// 浮动对象包装器（使用 PdfEngine 的 FloatingObject）
 /// </summary>
-public class FloatingObject : IElement
+public class FloatingObjectWrapper : IElement
 {
     public iTextImage Image { get; set; }
     public WrappingStyle Wrapping { get; set; }
     public float Left { get; set; }
-    public float Top { get; set; } // ??? Top ???????????,?????????????
-    public bool PositionIsAbsolute { get; set; } // ??????????????
-    public float RotationAngle { get; set; } // in degrees
+    public float Top { get; set; }
+    public bool PositionIsAbsolute { get; set; }
+    public float RotationAngle { get; set; }
+    /// <summary>
+    /// Distance from text (points). Applies equally on all sides; used to pad exclusion rectangles.
+    /// </summary>
+    public float TextDistance { get; set; }
     public float Width => Image.ScaledWidth;
     public float Height => Image.ScaledHeight;
-    
-    // IElement ????
-    public int Type => -100; // Custom type
+
+    // IElement 实现
+    public int Type => -100;
     public bool IsContent() => true;
     public bool IsNestable() => false;
 
-    public FloatingObject(iTextImage image)
+    public FloatingObjectWrapper(iTextImage image)
     {
         Image = image;
+    }
+
+    /// <summary>
+    /// 转换为 PdfEngine 的 FloatingObject
+    /// </summary>
+    public FloatingObject ToFloatingObject()
+    {
+        return new FloatingObject(Image)
+        {
+            Wrapping = Wrapping,
+            Left = Left,
+            Top = Top,
+            PositionIsAbsolute = PositionIsAbsolute,
+            TextDistance = TextDistance
+        };
     }
 }
 
@@ -275,9 +285,9 @@ public class ImageConverter
 
 
     /// <summary>
-    /// ? Anchor ???? (?? FloatingObject)
+    /// 从 Anchor 提取浮动对象 (返回 FloatingObjectWrapper)
     /// </summary>
-    private FloatingObject? ExtractFloatingObjectFromAnchor(DW.Anchor anchor, float pageWidth)
+    private FloatingObjectWrapper? ExtractFloatingObjectFromAnchor(DW.Anchor anchor, float pageWidth)
     {
         var extent = anchor.Extent;
         var blipFill = anchor.Descendants().FirstOrDefault(e => e.LocalName == "blip");
@@ -321,7 +331,7 @@ public class ImageConverter
 
         if (image == null) return null;
 
-        var floatObj = new FloatingObject(image);
+        var floatObj = new FloatingObjectWrapper(image);
         
         var xfrm = anchor.Descendants<DocumentFormat.OpenXml.Drawing.Transform2D>().FirstOrDefault();
         if (xfrm?.Rotation != null && xfrm.Rotation.HasValue)
@@ -340,15 +350,19 @@ public class ImageConverter
         // parse distances if present (attributes distT, distB, distL, distR in EMU)
         if (wrapSquare != null || wrapTight != null || wrapThrough != null || wrapTopBottom != null)
         {
-            var wrapElement = wrapSquare ?? wrapTight ?? wrapThrough ?? wrapTopBottom;
+            OpenXmlElement? wrapElement = wrapSquare ?? (OpenXmlElement?)wrapTight ?? (OpenXmlElement?)wrapThrough ?? wrapTopBottom;
             float dist = 0;
-            foreach (var attr in new[] { "distT", "distB", "distL", "distR" })
+            if (wrapElement != null)
             {
-                var v = wrapElement.GetAttribute(attr, null)?.Value;
-                if (long.TryParse(v, out var emu))
+                foreach (var attr in new[] { "distT", "distB", "distL", "distR" })
                 {
-                    float pt = emu / 914400f * 72f; // EMU to points (914400 EMU = 1 inch)
-                    dist = Math.Max(dist, pt);
+                    var attrValue = wrapElement.GetAttribute(attr, "");
+                    var v = attrValue.Value;
+                    if (!string.IsNullOrEmpty(v) && long.TryParse(v, out var emu))
+                    {
+                        float pt = emu / 914400f * 72f; // EMU to points (914400 EMU = 1 inch)
+                        dist = Math.Max(dist, pt);
+                    }
                 }
             }
             floatObj.TextDistance = dist;

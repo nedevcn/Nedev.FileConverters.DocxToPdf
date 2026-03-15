@@ -1,4 +1,5 @@
 using Nedev.FileConverters.DocxToPdf.Models;
+using SkiaSharp;
 
 namespace Nedev.FileConverters.DocxToPdf.PdfEngine;
 
@@ -58,6 +59,11 @@ public class ColumnText
 
     public const int NO_MORE_COLUMN = 1;
     public const int NO_MORE_TEXT = 2;
+
+    /// <summary>
+    /// 检查 Go() 返回的状态是否表示还有更多文本需要处理
+    /// </summary>
+    public static bool HasMoreText(int status) => status != NO_MORE_TEXT;
 
     // 环绕排除区
     public List<SkiaSharp.SKRect> Exclusions { get; } = new();
@@ -122,7 +128,7 @@ public class ColumnText
             foreach (var element in _elements)
             {
                 // record float exclusions before layout
-                if (element is global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj &&
+                if (element is FloatingObject fobj &&
                     fobj.Wrapping != WrappingStyle.Inline)
                 {
                     // compute current inline/block positions as will be passed to RenderElement
@@ -222,6 +228,8 @@ public class ColumnText
                     return NO_MORE_TEXT;
                 return NO_MORE_COLUMN;
             }
+            
+            return NO_MORE_TEXT;
         }
 
     /// 渲染元素
@@ -269,7 +277,7 @@ public class ColumnText
             default:
                 if (element.Type == -100) // FloatingObject
                 {
-                    var floatObj = element as global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject;
+                    var floatObj = element as FloatingObject;
                     if (floatObj != null && !simulate)
                     {
                         var imgObj = floatObj.Image;
@@ -285,8 +293,8 @@ public class ColumnText
                         }
                         _canvas.RestoreState();
                     }
-                    return floatObj != null && floatObj.Wrapping == global::Nedev.FileConverters.DocxToPdf.Converters.WrappingStyle.Inline 
-                        ? startBlock - (TextDirection == TextDirection.Vertical ? floatObj.Width : floatObj.Height) 
+                    return floatObj != null && floatObj.Wrapping == WrappingStyle.Inline
+                        ? startBlock - (TextDirection == TextDirection.Vertical ? floatObj.Width : floatObj.Height)
                         : startBlock;
                 }
                 return startBlock;
@@ -454,8 +462,8 @@ public class ColumnText
                             UnderlineYPosition = orig.UnderlineYPosition,
                             DirectionOverride = orig.DirectionOverride
                         }).ToList();
-                        // replace in line
-                        lines[li] = (letters, letters.Sum(l=>l.GetWidth()));
+                        // replace in line - maintain full tuple structure
+                        lines[li] = (letters, letters.Sum(l=>l.GetWidth()), lineStartX, yLine, lineAvailWidth);
                         chunks = letters;
                     }
                     extraGap = (lineAvailWidth - lineWidth) / (float)(chunks.Count - 1);
@@ -612,9 +620,10 @@ public class ColumnText
                 {
                     // replace current chunk with parts and restart processing from same index
                     para.Chunks.RemoveAt(ci);
-                    para.Chunks.InsertRange(ci, subs);
+                    foreach (var sub in subs)
+                        para.Chunks.Insert(ci++, sub);
                     // decrement ci so next iteration processes first new subchunk
-                    ci--;
+                    ci -= (subs.Count + 1);
                     continue;
                 }
 
@@ -1016,10 +1025,10 @@ public class ColumnText
         int fitCount = 0;
         for (int i = 1; i <= chunks.Count; i++)
         {
-            var testPara = new Paragraph(para)
-            {
-                Chunks = chunks.Take(i).ToList()
-            };
+            var testPara = new Paragraph(para);
+            // Clear and add chunks
+            for (int j = 0; j < i; j++)
+                testPara.Add(chunks[j]);
             float height = EstimateHeight(testPara, availableLength);
             if (height <= availableHeight + 0.1f)
             {
@@ -1043,14 +1052,14 @@ public class ColumnText
             return (para, null);
         }
 
-        var firstPara = new Paragraph(para)
-        {
-            Chunks = chunks.Take(fitCount).ToList()
-        };
-        var restPara = new Paragraph(para)
-        {
-            Chunks = chunks.Skip(fitCount).ToList()
-        };
+        var firstPara = new Paragraph(para);
+        var restPara = new Paragraph(para);
+        // Add chunks to firstPara
+        for (int i = 0; i < fitCount; i++)
+            firstPara.Add(chunks[i]);
+        // Add chunks to restPara
+        for (int i = fitCount; i < chunks.Count; i++)
+            restPara.Add(chunks[i]);
         return (firstPara, restPara);
     }
 
@@ -1082,9 +1091,9 @@ public class ColumnText
     /// Add an exclusion rectangle for a floating object so text wraps around it.
     /// Only objects with absolute positioning are considered.
     /// </summary>
-private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Converters.FloatingObject fobj, float startInline, float startBlock)
-        {
-            var img = fobj.Image;
+    private void AddExclusionForFloating(FloatingObject fobj, float startInline, float startBlock)
+    {
+        var img = fobj.Image;
             // helper to collapse overlapping/touching rectangles
             void MergeExclusions()
             {
@@ -1361,8 +1370,10 @@ private void AddExclusionForFloating(global::Nedev.FileConverters.DocxToPdf.Conv
                     break;
                 default:
                     addRect(leftBB, bottomBB, leftBB + rotWidth, bottomBB + rotHeight);
+                    break;
             }
             MergeExclusions();
         }
+    }
 }
-}
+
